@@ -15,8 +15,10 @@ import {
   DEFAULT_POLAR_ORGANIZATION_ID,
   FREE_LOCAL_MAX_INVOICE_LINES,
   FREE_LOCAL_MAX_SKUS,
+  GLAMA_SERVER_URL,
   MCPIZE_CLOUD_URL,
   mintEd25519LicenseToken,
+  POLAR_AGENCY_CHECKOUT_URL,
   POLAR_SOLO_CHECKOUT_URL,
   resolveEntitlement,
   UPGRADE_NOTICE
@@ -1393,15 +1395,21 @@ describe("Pass-6 Deep Audit Regressions (Shopify CSV Handle Inheritance, Multi-L
     }
   });
 
-  it("wires live Polar.sh ($49) & MCPize ($29/mo) URLs, hero product image, and default Polar org validation", async () => {
+  it("wires live Polar.sh ($49 Solo + $249 Agency), MCPize ($29/mo), Glama Grade A URLs, hero product image, and default Polar org validation", async () => {
     clearEntitlementCache();
     assert.equal(DEFAULT_POLAR_ORGANIZATION_ID, "451b88fb-d285-4c16-b86c-9a8cb33fb09c");
     assert.equal(
       POLAR_SOLO_CHECKOUT_URL,
       "https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV"
     );
+    assert.equal(
+      POLAR_AGENCY_CHECKOUT_URL,
+      "https://buy.polar.sh/polar_cl_wrMfDFquV3H9rvyLRSzkpdN4I57zyCTBvYqfd04O82Y"
+    );
     assert.equal(MCPIZE_CLOUD_URL, "https://mcpize.com/mcp/po-pilot-mcp");
+    assert.equal(GLAMA_SERVER_URL, "https://glama.ai/mcp/servers/maskchanel14-source/po-pilot-mcp");
     assert.ok(UPGRADE_NOTICE.includes(POLAR_SOLO_CHECKOUT_URL));
+    assert.ok(UPGRADE_NOTICE.includes(POLAR_AGENCY_CHECKOUT_URL));
     assert.ok(UPGRADE_NOTICE.includes(MCPIZE_CLOUD_URL));
 
     // Bare Polar key (without `<org_uuid>:` prefix) must validate automatically against DEFAULT_POLAR_ORGANIZATION_ID
@@ -1441,8 +1449,10 @@ describe("Pass-6 Deep Audit Regressions (Shopify CSV Handle Inheritance, Multi-L
     assert.ok(coverStats.size > 20_000 && coverStats.size < 450_000, "Cover JPEG must be crisp yet lightweight (<450KB)");
 
     const readme = readFileSync("README.md", "utf8");
-    assert.ok(readme.includes(POLAR_SOLO_CHECKOUT_URL), "README must link directly to Polar.sh $49 checkout");
+    assert.ok(readme.includes(POLAR_SOLO_CHECKOUT_URL), "README must link directly to Polar.sh $49 Solo checkout");
+    assert.ok(readme.includes(POLAR_AGENCY_CHECKOUT_URL), "README must link directly to Polar.sh $249 Agency checkout");
     assert.ok(readme.includes(MCPIZE_CLOUD_URL), "README must link directly to MCPize Cloud listing");
+    assert.ok(readme.includes(GLAMA_SERVER_URL), "README must link directly to Glama Grade A listing");
     assert.ok(readme.includes("https://www.npmjs.com/package/po-pilot-mcp"), "README must link to npm package");
     assert.ok(readme.includes("po-pilot-product-cover.jpg"), "README must embed product hero banner");
   });
