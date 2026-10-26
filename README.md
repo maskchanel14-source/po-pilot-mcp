@@ -1,5 +1,6 @@
 # PO Pilot MCP (`po-pilot-mcp`)
 
+[![MCPize](https://mcpize.com/badge/@maskchanel14-source/po-pilot-mcp)](https://mcpize.com/mcp/po-pilot-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](package.json)
 [![MCP SDK 1.32.2](https://img.shields.io/badge/MCP_SDK-1.32.2-purple.svg)](package.json)
@@ -10,6 +11,18 @@
 Shopify retired **Stocky** on August 31, 2026. Native Shopify Admin stores inventory counts and draft PO records, yet drops the purchasing logic merchants relied on: reorder point calculation, carton/case-pack rounding, vendor minimum order thresholds, supplier export, and invoice discrepancy checks. Meanwhile, Shopify's official Storefront and UCP MCP endpoints (`catalog`, `cart`, `checkout`, `policies`) serve front-office shoppers only.
 
 `po-pilot-mcp` connects Claude Desktop, Claude Code, Cursor, or n8n to four deterministic back-office purchasing tools. Every tool runs locally or over Streamable HTTP with **zero required credentials** in `demo_mode` or CSV mode, and optionally connects to live **Shopify Admin GraphQL (`2026-04`)** when read-only store credentials are supplied.
+
+---
+
+## Connect via MCPize
+
+Use this MCP server instantly with no local installation:
+
+```bash
+npx -y mcpize connect @maskchanel14-source/po-pilot-mcp --client claude
+```
+
+Or connect at: **https://mcpize.com/mcp/po-pilot-mcp**
 
 ---
 

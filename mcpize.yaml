@@ -1,71 +1,29 @@
-# MCPize Deployment Manifest — validated against mcpize@1.2.2 ManifestSchema
-# Deploy: npm install -g mcpize && mcpize login && mcpize deploy --yes
-#
-# Recommended Subscription Tiers (set in MCPize Developer Dashboard -> Monetization):
-#   - Free Sandbox ($0/mo):   15 requests/month
-#   - Cloud Pro ($29/mo):     500 requests/month
-#   - Cloud Agency ($79/mo):  3,000 requests/month
+# MCPize Configuration
+# Docs: https://mcpize.com/docs/mcpize-yaml
+
 version: 1
-name: po-pilot-mcp
-description: >-
-  Replaces Shopify Stocky's retired purchasing workflow: stockout-adjusted
-  safety stock, Open-to-Buy & tariff landed-cost Purchase Orders + Shopify PO &
-  POS Transfer CSVs, Stocky CSV recovery, and 3-way match with QBO/Xero CSVs.
+
+name: "PO Pilot — Shopify Replenishment & 3-Way Match"
+slug: "po-pilot-mcp"
 
 runtime: typescript
-entry: dist/index.js
 
 build:
-  install: npm ci
-  command: npm run build
+  install: "npm ci"
+  command: "npm run build"
 
-startCommand:
+start:
   type: stdio
-  command: node
+  command: "node"
   args:
-    - dist/index.js
+    - "dist/index.js"
 
-# Private publisher secret (set in MCPize Dashboard -> Secrets to unlock >25 SKUs on your hosted cloud):
-secrets:
-  - name: PO_PILOT_SERVER_LICENSE_KEY
-    required: false
-    description: Optional publisher-level Polar/POP1 license key so hosted Pro/Agency cloud subscribers get unlimited SKUs.
-
-# Optional per-user BYO credentials (credential name maps directly to ENV var at runtime):
 credentials:
-  - name: PO_PILOT_LICENSE_KEY
-    required: false
-    description: Optional Polar.sh (<org_uuid>:<key>) or POP1.* license key to unlock unlimited SKUs and live Shopify sync.
-    placeholder: "fda84e25-7b55-4d67-916d-60ead04ff61f:POLAR-XXXX"
-  - name: SHOPIFY_STORE_DOMAIN
-    required: false
-    description: Optional Shopify store domain (your-store.myshopify.com) for live Admin GraphQL reads. Leave blank for CSV or demo_mode.
-    placeholder: "your-store.myshopify.com"
-    docs_url: https://help.shopify.com/en/manual/apps/app-types/custom-apps
-  - name: SHOPIFY_ACCESS_TOKEN
-    required: false
-    description: Optional read-only Shopify Admin API token (shpat_...) with read_products, read_inventory, and read_orders scopes.
-    placeholder: "shpat_..."
-    docs_url: https://help.shopify.com/en/manual/apps/app-types/custom-apps
-
-credentials_mode: per_user
-
-# Optional x402 Pay-Per-Call USDC on Base (uncomment and paste your EIP-55 mixed-case Base wallet address):
-# pricing:
-#   protocol: x402
-#   network: base
-#   recipient: "0xYourEip55ChecksummedBaseWalletAddressHere"
-#   asset: usdc
-#   tools:
-#     - name: calculate_replenishment_plan
-#       price: "0.03"
-#       description: "Compute stockout-adjusted safety stock, ABC classes, and reorder quantities."
-#     - name: build_supplier_purchase_orders
-#       price: "0.06"
-#       description: "Generate MOQ/OTB supplier POs, tariff landed costs, and Shopify PO + POS Transfer CSVs."
-#     - name: reconcile_po_three_way_match
-#       price: "0.10"
-#       description: "Audit PO vs receiving vs supplier invoice and emit Debit Memo + QuickBooks/Xero Bill CSVs."
-#     - name: migrate_stocky_csv_snapshot
-#       price: "0.02"
-#       description: "Reconstruct supplier lead times, pack multiples, and costs from Stocky CSV."
+  - name: "PO_PILOT_LICENSE_KEY"
+    description: "Optional Polar.sh (<org_uuid>:<key>) or POP1.* license key to unlock unlimited SKUs and live Shopify sync."
+  - name: "SHOPIFY_STORE_DOMAIN"
+    description: "Optional Shopify store domain (your-store.myshopify.com) for live Admin GraphQL reads. Leave blank for CSV or demo_mode."
+    docs_url: "https://help.shopify.com/en/manual/apps/app-types/custom-apps"
+  - name: "SHOPIFY_ACCESS_TOKEN"
+    description: "Optional read-only Shopify Admin API token (shpat_...) with read_products, read_inventory, and read_orders scopes."
+    docs_url: "https://help.shopify.com/en/manual/apps/app-types/custom-apps"
