@@ -1,0 +1,98 @@
+{
+  "name": "PO Pilot 01 — Monday Morning Shopify Replenishment & Vendor PO Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "b1f20001-0001-4000-8000-000000000001",
+      "name": "Every Monday 08:00 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PO_PILOT_MCP_HTTP_URL || 'http://localhost:8080/mcp' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"build_supplier_purchase_orders\",\n    \"arguments\": {\n      \"use_live_shopify\": true,\n      \"service_level\": \"95%\",\n      \"review_period_days\": 14,\n      \"po_prefix\": \"PO-AUTO\"\n    }\n  }\n}"
+      },
+      "id": "b1f20001-0002-4000-8000-000000000002",
+      "name": "Call PO Pilot MCP (build_supplier_purchase_orders)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst textPayload = raw?.result?.content?.[0]?.text || '{}';\nconst parsed = JSON.parse(textPayload);\nif (!parsed.ok || !parsed.purchase_orders?.length) {\n  return [{ json: { hasOrders: false, summary: 'No SKUs crossed reorder points this week.' } }];\n}\nreturn parsed.purchase_orders.map((po) => ({\n  json: {\n    hasOrders: true,\n    po_number: po.po_number,\n    vendor: po.vendor,\n    contact_email: po.contact_email,\n    subtotal_usd: po.subtotal_usd,\n    total_units: po.total_units,\n    moq_notes: po.moq_notes,\n    shopify_draft_po_csv: po.shopify_draft_po_csv,\n    vendor_email_markdown: po.vendor_email_markdown\n  }\n}));"
+      },
+      "id": "b1f20001-0003-4000-8000-000000000003",
+      "name": "Parse Supplier POs & Shopify CSVs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.hasOrders }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "b1f20001-0004-4000-8000-000000000004",
+      "name": "Any POs Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [980, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#purchasing-ops",
+        "text": "=*New Draft Purchase Order Ready:* `{{ $json.po_number }}` for *{{ $json.vendor }}*\n• *Units:* {{ $json.total_units }} | *Subtotal:* ${{ $json.subtotal_usd }}\n• *MOQ Check:* {{ $json.moq_notes }}\n\n*Shopify Admin Draft PO CSV:*\n```{{ $json.shopify_draft_po_csv }}```"
+      },
+      "id": "b1f20001-0005-4000-8000-000000000005",
+      "name": "Post PO + CSV to Slack #purchasing-ops",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1240, 220]
+    }
+  ],
+  "connections": {
+    "Every Monday 08:00 AM": {
+      "main": [[{ "node": "Call PO Pilot MCP (build_supplier_purchase_orders)", "type": "main", "index": 0 }]]
+    },
+    "Call PO Pilot MCP (build_supplier_purchase_orders)": {
+      "main": [[{ "node": "Parse Supplier POs & Shopify CSVs", "type": "main", "index": 0 }]]
+    },
+    "Parse Supplier POs & Shopify CSVs": {
+      "main": [[{ "node": "Any POs Needed?", "type": "main", "index": 0 }]]
+    },
+    "Any POs Needed?": {
+      "main": [[{ "node": "Post PO + CSV to Slack #purchasing-ops", "type": "main", "index": 0 }], []]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

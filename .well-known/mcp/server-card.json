@@ -1,0 +1,18 @@
+{
+  "name": "po-pilot-mcp",
+  "version": "1.0.0",
+  "description": "Post-Stocky Shopify replenishment, MOQ/case-pack Purchase Order generator, Stocky CSV supplier recovery, and 3-way supplier invoice reconciliation MCP server.",
+  "license": "MIT",
+  "repository": "https://github.com/maskchanel14-source/po-pilot-mcp",
+  "transports": ["stdio", "streamable-http"],
+  "authentication": {
+    "required": false,
+    "optional_env": ["SHOPIFY_STORE_DOMAIN", "SHOPIFY_ACCESS_TOKEN"]
+  },
+  "tools": [
+    "calculate_replenishment_plan",
+    "build_supplier_purchase_orders",
+    "reconcile_po_three_way_match",
+    "migrate_stocky_csv_snapshot"
+  ]
+}

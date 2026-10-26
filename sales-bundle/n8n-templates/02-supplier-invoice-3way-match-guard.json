@@ -1,0 +1,94 @@
+{
+  "name": "PO Pilot 02 — Accounts Payable 3-Way Match & Vendor Debit Memo Guard",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ap-invoice-intake",
+        "responseMode": "lastNode"
+      },
+      "id": "c2f30001-0001-4000-8000-000000000001",
+      "name": "Incoming Vendor Invoice Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PO_PILOT_MCP_HTTP_URL || 'http://localhost:8080/mcp' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Accept", "value": "application/json, text/event-stream" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'reconcile_po_three_way_match', arguments: $json.body || { demo_mode: true } } }) }}"
+      },
+      "id": "c2f30001-0002-4000-8000-000000000002",
+      "name": "Run 3-Way Match via PO Pilot MCP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst textPayload = raw?.result?.content?.[0]?.text || '{}';\nconst audit = JSON.parse(textPayload);\nreturn [{ json: audit }];"
+      },
+      "id": "c2f30001-0003-4000-8000-000000000003",
+      "name": "Unpack Audit Verdict",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.payment_recommendation }}",
+              "operation": "equals",
+              "value2": "HOLD_AND_ISSUE_DEBIT_MEMO"
+            }
+          ]
+        }
+      },
+      "id": "c2f30001-0004-4000-8000-000000000004",
+      "name": "Discrepancy Detected?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#finance-ap",
+        "text": "=🚨 *HOLD PAYMENT — 3-Way Match Variance on {{ $json.po_number }} ({{ $json.vendor }})*\n• *Invoice Billed:* ${{ $json.total_invoice_billed_usd }}\n• *Verified Payable:* ${{ $json.verified_payable_amount_usd }}\n• *Overcharge Caught:* *${{ $json.total_overcharge_recovered_usd }}*\n\n*Draft Debit Memo:*\n```{{ $json.debit_memo_email_markdown }}```"
+      },
+      "id": "c2f30001-0005-4000-8000-000000000005",
+      "name": "Alert Finance AP & Block Overpayment",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1260, 220]
+    }
+  ],
+  "connections": {
+    "Incoming Vendor Invoice Webhook": {
+      "main": [[{ "node": "Run 3-Way Match via PO Pilot MCP", "type": "main", "index": 0 }]]
+    },
+    "Run 3-Way Match via PO Pilot MCP": {
+      "main": [[{ "node": "Unpack Audit Verdict", "type": "main", "index": 0 }]]
+    },
+    "Unpack Audit Verdict": {
+      "main": [[{ "node": "Discrepancy Detected?", "type": "main", "index": 0 }]]
+    },
+    "Discrepancy Detected?": {
+      "main": [[{ "node": "Alert Finance AP & Block Overpayment", "type": "main", "index": 0 }], []]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

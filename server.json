@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.maskchanel14-source/po-pilot-mcp",
+  "description": "Post-Stocky Shopify replenishment, MOQ Purchase Order generator, and 3-way invoice match MCP.",
+  "repository": {
+    "url": "https://github.com/maskchanel14-source/po-pilot-mcp",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "po-pilot-mcp",
+      "version": "1.0.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

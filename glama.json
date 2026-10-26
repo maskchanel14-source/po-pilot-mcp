@@ -1,0 +1,24 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": ["maskchanel14-source"],
+  "name": "po-pilot-mcp",
+  "description": "Post-Stocky Shopify replenishment, vendor MOQ/carton Purchase Order generator, Stocky CSV supplier recovery, and Accounts Payable 3-way match MCP server.",
+  "tools": {
+    "calculate_replenishment_plan": {
+      "enabled": true,
+      "description": "Computes margin-weighted ABC classes, stockout-adjusted daily velocity, demand + lead-time variability safety stock, reorder points, and carton-rounded order recommendations."
+    },
+    "build_supplier_purchase_orders": {
+      "enabled": true,
+      "description": "Groups SKUs by vendor, enforces carton multiples + supplier MOQ/USD thresholds via smart A-SKU top-ups, and outputs Shopify Native Draft PO CSVs + supplier emails."
+    },
+    "reconcile_po_three_way_match": {
+      "enabled": true,
+      "description": "Cross-checks PO vs warehouse receiving vs supplier invoice to catch silent price creep, short-shipments, and unapproved fees, outputting a Debit Memo."
+    },
+    "migrate_stocky_csv_snapshot": {
+      "enabled": true,
+      "description": "Reconstructs un-exportable supplier directory, real lead times, carton multiples, and SKU cost history from Stocky Purchase Order CSV exports."
+    }
+  }
+}
