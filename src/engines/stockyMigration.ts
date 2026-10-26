@@ -39,27 +39,31 @@ export function migrateStockyPoCsv(rawCsv: string): {
   ready_supplier_rules_json: SupplierRule[];
 } {
   const rows = parseCsv(rawCsv);
-  const vendorBuckets = new Map<string, Array<{ row: Record<string, string>; createdMs: number | null; rowIdx: number }>>();
+  const vendorBuckets = new Map<
+    string,
+    { displayVendor: string; entries: Array<{ row: Record<string, string>; createdMs: number | null; rowIdx: number }> }
+  >();
 
   rows.forEach((row, rowIdx) => {
     const vendor = pickField(row, ["Supplier", "Vendor", "Supplier Name"]).trim();
     if (!vendor) return;
+    const vendorKey = vendor.toLowerCase();
     const createdStr = pickField(row, ["Created At", "Order Date", "PO Date", "Date"]);
     const parsedCreated = createdStr ? Date.parse(createdStr) : NaN;
-    const list = vendorBuckets.get(vendor) ?? [];
-    list.push({
+    const bucket = vendorBuckets.get(vendorKey) ?? { displayVendor: vendor, entries: [] };
+    bucket.entries.push({
       row,
       createdMs: Number.isFinite(parsedCreated) ? parsedCreated : null,
       rowIdx
     });
-    vendorBuckets.set(vendor, list);
+    vendorBuckets.set(vendorKey, bucket);
   });
 
   const profiles: ReconstructedSupplierProfile[] = [];
   const rules: SupplierRule[] = [];
   let totalSkus = 0;
 
-  for (const [vendor, entries] of vendorBuckets.entries()) {
+  for (const { displayVendor: vendor, entries } of vendorBuckets.values()) {
     // Sort chronologically oldest -> newest so latestCost always reflects the most recent PO
     // even when Stocky/Shopify exports rows newest-first (descending).
     const chronological = [...entries].sort((a, b) => {

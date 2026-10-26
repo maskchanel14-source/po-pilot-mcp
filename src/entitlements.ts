@@ -70,9 +70,24 @@ function verifyEd25519Token(token: string, publicKeySpkiB64: string): Entitlemen
       return { unlocked: false, tier: "free_local", source: "invalid", reason: "bad_signature" };
     }
 
-    const parsed = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8")) as LicensePayload;
-    if (typeof parsed.exp === "number" && Math.floor(Date.now() / 1000) > parsed.exp) {
-      return { unlocked: false, tier: "free_local", source: "invalid", reason: "license_expired" };
+    const parsed = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8")) as {
+      sub?: string;
+      tier?: string;
+      exp?: number | string;
+    };
+    if (parsed.exp !== undefined) {
+      let expSeconds: number;
+      if (typeof parsed.exp === "number") {
+        expSeconds = parsed.exp;
+      } else if (typeof parsed.exp === "string") {
+        const parsedMs = Date.parse(parsed.exp);
+        expSeconds = Number.isFinite(parsedMs) ? Math.floor(parsedMs / 1000) : -1;
+      } else {
+        expSeconds = -1;
+      }
+      if (!Number.isFinite(expSeconds) || Math.floor(Date.now() / 1000) > expSeconds) {
+        return { unlocked: false, tier: "free_local", source: "invalid", reason: "license_expired" };
+      }
     }
 
     const tier = parsed.tier === "agency" || parsed.tier === "lifetime" ? parsed.tier : "pro";

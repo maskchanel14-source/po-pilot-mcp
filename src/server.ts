@@ -15,7 +15,7 @@ import {
   UPGRADE_NOTICE
 } from "./entitlements.js";
 import { generateSupplierPurchaseOrders } from "./engines/purchaseOrder.js";
-import { computeReplenishmentPlan } from "./engines/replenishment.js";
+import { computeReplenishmentPlan, deduplicateSignals } from "./engines/replenishment.js";
 import { migrateStockyPoCsv } from "./engines/stockyMigration.js";
 import { runThreeWayMatch } from "./engines/threeWayMatch.js";
 import { fetchLiveShopifySignals, resolveShopifyConfig } from "./shopifyClient.js";
@@ -111,7 +111,9 @@ function estimateDaysOfCoverRatio(s: SkuSignal): number {
   const activeDays = Math.max(1, s.window_days - Math.min(s.stockout_days, s.window_days - 1));
   const dailyVel = s.units_sold_window / activeDays;
   const invPos = s.on_hand + s.on_order - s.committed - s.backorders;
-  if (dailyVel <= 0) return Number.POSITIVE_INFINITY;
+  if (dailyVel <= 0) {
+    return invPos < 0 ? -1_000_000 + invPos : Number.POSITIVE_INFINITY;
+  }
   // Normalize by lead time so SKUs closest to stocking out before supplier arrival surface first
   return (invPos / dailyVel) - s.lead_time_days;
 }
@@ -172,7 +174,8 @@ async function resolveSkuInputs(
     }
   }
 
-  const withRuleLeads = applySupplierRuleOverrides(rawSignals, supplierRules);
+  const deduplicated = deduplicateSignals(rawSignals);
+  const withRuleLeads = applySupplierRuleOverrides(deduplicated, supplierRules);
 
   if (!unlocked && withRuleLeads.length > FREE_LOCAL_MAX_SKUS) {
     // Surface the 25 most urgent stockout-risk SKUs first so Free Sandbox users immediately see real reorder insights
@@ -375,13 +378,15 @@ export function createPoPilotServer(): McpServer {
 
         if (!args.demo_mode && !entitlement.unlocked && basePayload.invoice_lines.length > FREE_LOCAL_MAX_INVOICE_LINES) {
           const cappedInvoiceLines = basePayload.invoice_lines.slice(0, FREE_LOCAL_MAX_INVOICE_LINES);
-          const allowedSkus = new Set(cappedInvoiceLines.map((l) => l.sku.trim()));
+          const allowedSkus = new Set(cappedInvoiceLines.map((l) => l.sku.trim().toUpperCase()));
           // If receiving_lines had entries for other SKUs, preserve a sentinel receiving check when filtering
-          const filteredReceiving = basePayload.receiving_lines.filter((l) => allowedSkus.has(l.sku.trim()));
+          const filteredReceiving = basePayload.receiving_lines.filter((l) =>
+            allowedSkus.has(l.sku.trim().toUpperCase())
+          );
           effectivePayload = {
             ...basePayload,
             invoice_lines: cappedInvoiceLines,
-            po_lines: basePayload.po_lines.filter((l) => allowedSkus.has(l.sku.trim())),
+            po_lines: basePayload.po_lines.filter((l) => allowedSkus.has(l.sku.trim().toUpperCase())),
             receiving_lines:
               basePayload.receiving_lines.length > 0 && filteredReceiving.length === 0
                 ? [{ sku: "__RECEIVING_LOG_PRESENT__", received_good_qty: 0, damaged_qty: 0 }]

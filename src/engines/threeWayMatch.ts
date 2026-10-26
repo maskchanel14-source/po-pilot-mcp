@@ -35,11 +35,14 @@ export function runThreeWayMatch(input: {
   invoice_extra_fees_usd?: number;
   agreed_freight_cap_usd?: number;
 }): ThreeWayMatchResult {
-  // Aggregate duplicate SKU lines safely (e.g., split-pallet receiving or split-line invoices)
+  // Aggregate duplicate SKU lines safely (e.g., split-pallet receiving or split-line invoices) using case-insensitive SKU keys
+  const displaySku = new Map<string, string>();
   const poMap = new Map<string, { sku: string; ordered_qty: number; total_cost: number; unit_cost_usd: number }>();
   for (const l of input.po_lines) {
-    const key = l.sku.trim();
-    const cur = poMap.get(key) ?? { sku: key, ordered_qty: 0, total_cost: 0, unit_cost_usd: l.unit_cost_usd };
+    const raw = l.sku.trim();
+    const key = raw.toUpperCase();
+    if (!displaySku.has(key)) displaySku.set(key, raw);
+    const cur = poMap.get(key) ?? { sku: displaySku.get(key) ?? raw, ordered_qty: 0, total_cost: 0, unit_cost_usd: l.unit_cost_usd };
     cur.ordered_qty += l.ordered_qty;
     cur.total_cost += l.ordered_qty * l.unit_cost_usd;
     cur.unit_cost_usd = cur.ordered_qty > 0 ? cur.total_cost / cur.ordered_qty : l.unit_cost_usd;
@@ -49,18 +52,23 @@ export function runThreeWayMatch(input: {
   const hasReceivingLog = input.receiving_lines.length > 0;
   const recMap = new Map<string, { sku: string; received_good_qty: number; damaged_qty: number }>();
   for (const r of input.receiving_lines) {
-    const key = r.sku.trim();
-    const cur = recMap.get(key) ?? { sku: key, received_good_qty: 0, damaged_qty: 0 };
+    const raw = r.sku.trim();
+    const key = raw.toUpperCase();
+    if (!displaySku.has(key)) displaySku.set(key, raw);
+    const cur = recMap.get(key) ?? { sku: displaySku.get(key) ?? raw, received_good_qty: 0, damaged_qty: 0 };
     cur.received_good_qty += r.received_good_qty;
     cur.damaged_qty += r.damaged_qty ?? 0;
     recMap.set(key, cur);
   }
 
-  const invMap = new Map<string, { sku: string; billed_qty: number; total_billed: number; billed_unit_cost_usd: number }>();
+  const invMap = new Map<string, { key: string; sku: string; billed_qty: number; total_billed: number; billed_unit_cost_usd: number }>();
   for (const inv of input.invoice_lines) {
-    const key = inv.sku.trim();
+    const raw = inv.sku.trim();
+    const key = raw.toUpperCase();
+    if (!displaySku.has(key)) displaySku.set(key, raw);
     const cur = invMap.get(key) ?? {
-      sku: key,
+      key,
+      sku: displaySku.get(key) ?? raw,
       billed_qty: 0,
       total_billed: 0,
       billed_unit_cost_usd: inv.billed_unit_cost_usd
@@ -94,7 +102,7 @@ export function runThreeWayMatch(input: {
     const lineBilled = inv.total_billed;
     totalBilled += lineBilled;
 
-    const po = poMap.get(inv.sku);
+    const po = poMap.get(inv.key);
     if (!po) {
       discrepancies.push({
         sku: inv.sku,
@@ -107,7 +115,7 @@ export function runThreeWayMatch(input: {
       continue;
     }
 
-    const rec = recMap.get(inv.sku);
+    const rec = recMap.get(inv.key);
     // Critical AP rule: when a warehouse receiving log IS supplied (`hasReceivingLog === true`),
     // an unlisted SKU means 0 units arrived at the dock (never assume `po.ordered_qty`!).
     const verifiedReceivedGoodQty = hasReceivingLog ? (rec?.received_good_qty ?? 0) : po.ordered_qty;

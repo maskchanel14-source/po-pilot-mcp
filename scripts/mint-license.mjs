@@ -4,6 +4,7 @@
  *
  * 1) Generate keypair locally (saved to gitignored `.keys/`):
  *    node scripts/mint-license.mjs --keygen
+ *    (or stateless stdout mode: node scripts/mint-license.mjs --generate-keypair)
  *
  * 2) Mint an offline license token for Upwork / Contra / Gumroad / MCPize Server Secret:
  *    node scripts/mint-license.mjs --sign --sub "merchant@store.com" --tier lifetime
@@ -13,6 +14,7 @@ import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+const VALID_TIERS = new Set(["pro", "agency", "lifetime"]);
 const keysDir = resolve(process.cwd(), ".keys");
 const privPath = resolve(keysDir, "po-pilot-ed25519-private.pem");
 const pubPath = resolve(keysDir, "po-pilot-ed25519-public.spki.b64");
@@ -37,22 +39,55 @@ if (args.includes("--keygen")) {
   process.exit(0);
 }
 
+if (args.includes("--generate-keypair")) {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const pubDerB64 = publicKey.export({ type: "spki", format: "der" }).toString("base64");
+  const privDerB64 = privateKey.export({ type: "pkcs8", format: "der" }).toString("base64");
+  console.log("=== PO PILOT ED25519 LICENSE KEYPAIR ===");
+  console.log("\n1. PUBLIC KEY (safe to embed in src/entitlements.ts -> DEFAULT_PUBLIC_KEY_SPKI_B64):");
+  console.log(pubDerB64);
+  console.log("\n2. PRIVATE SIGNING KEY (KEEP SECRET — store in 1Password / Bitwarden, NEVER commit):");
+  console.log(privDerB64);
+  process.exit(0);
+}
+
 if (args.includes("--sign")) {
-  if (!existsSync(privPath)) {
-    console.error("Missing .keys/po-pilot-ed25519-private.pem — run `node scripts/mint-license.mjs --keygen` first.");
+  const sub = (getArg("--sub") || getArg("--email") || "customer@store.com").trim();
+  const tier = getArg("--tier", "pro").trim().toLowerCase();
+  if (!VALID_TIERS.has(tier)) {
+    console.error(`Error: Invalid --tier '${tier}'. Must be one of: pro, agency, lifetime.`);
     process.exit(1);
   }
-  const sub = getArg("--sub", "customer@store.com");
-  const tier = getArg("--tier", "pro");
-  const days = Number(getArg("--days", "0"));
+
+  const rawDays = getArg("--days", tier === "lifetime" ? "0" : "0");
+  const days = Number(rawDays);
+  if (!Number.isFinite(days) || days < 0) {
+    console.error(`Error: Invalid --days '${rawDays}'. Must be a non-negative number (0 = lifetime).`);
+    process.exit(1);
+  }
+
+  let privateKey;
+  const privB64 = process.env.PO_PILOT_SIGNING_PRIVATE_KEY_B64 || getArg("--private-key");
+  if (privB64) {
+    privateKey = createPrivateKey({
+      key: Buffer.from(privB64, "base64"),
+      format: "der",
+      type: "pkcs8"
+    });
+  } else if (existsSync(privPath)) {
+    privateKey = createPrivateKey({ key: readFileSync(privPath, "utf8"), format: "pem", type: "pkcs8" });
+  } else {
+    console.error("Error: Missing .keys/po-pilot-ed25519-private.pem or PO_PILOT_SIGNING_PRIVATE_KEY_B64. Run `--keygen` first.");
+    process.exit(1);
+  }
+
   const payload = {
     sub,
     tier,
-    ...(days > 0 ? { exp: Math.floor(Date.now() / 1000) + days * 86400 } : {})
+    ...(days > 0 ? { exp: Math.floor(Date.now() / 1000) + Math.round(days * 86400) } : {})
   };
   const payloadB64 = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  const privKey = createPrivateKey({ key: readFileSync(privPath, "utf8"), format: "pem", type: "pkcs8" });
-  const sigB64 = sign(null, Buffer.from(payloadB64, "utf8"), privKey).toString("base64url");
+  const sigB64 = sign(null, Buffer.from(payloadB64, "utf8"), privateKey).toString("base64url");
   console.log(`POP1.${payloadB64}.${sigB64}`);
   process.exit(0);
 }

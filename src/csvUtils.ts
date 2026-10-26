@@ -1,12 +1,39 @@
 import type { SkuSignal } from "./types.js";
 
+function detectDelimiter(text: string): string {
+  let inQuotes = false;
+  let commas = 0;
+  let tabs = 0;
+  let semicolons = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQuotes && text[i + 1] === '"') i++;
+      else inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && (ch === "\n" || ch === "\r")) break;
+    if (!inQuotes) {
+      if (ch === ",") commas++;
+      else if (ch === "\t") tabs++;
+      else if (ch === ";") semicolons++;
+    }
+  }
+  if (commas > 0) return ",";
+  if (tabs > 0) return "\t";
+  if (semicolons > 0) return ";";
+  return ",";
+}
+
 /**
- * Minimal RFC-4180 compliant CSV parser supporting quoted fields, escaped quotes, and CRLF/LF.
+ * Minimal RFC-4180 compliant CSV/TSV parser supporting quoted fields, escaped quotes,
+ * CRLF/LF, UTF-8 BOM, and auto-detected delimiters (comma CSV, Google Sheets/Excel TSV, semicolon CSV).
  */
 export function parseCsv(rawCsv: string): Array<Record<string, string>> {
   const text = rawCsv.replace(/^\uFEFF/, "").trim();
   if (!text) return [];
 
+  const delimiter = detectDelimiter(text);
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let field = "";
@@ -28,7 +55,7 @@ export function parseCsv(rawCsv: string): Array<Record<string, string>> {
     } else {
       if (ch === '"') {
         inQuotes = true;
-      } else if (ch === ",") {
+      } else if (ch === delimiter) {
         currentRow.push(field.trim());
         field = "";
       } else if (ch === "\r" && next === "\n") {
@@ -110,7 +137,9 @@ export function pickField(row: Record<string, string>, aliases: string[]): strin
 
 export function parseNumber(val: string, fallback: number): number {
   if (!val) return fallback;
-  const cleaned = val.replace(/[$,%\s]/g, "");
+  const trimmed = val.trim();
+  const unwrapped = /^\(.+\)$/.test(trimmed) ? `-${trimmed.slice(1, -1)}` : trimmed;
+  const cleaned = unwrapped.replace(/[$,%\s]/g, "");
   if (!cleaned) return fallback;
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : fallback;

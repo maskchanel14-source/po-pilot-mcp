@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { describe, it } from "node:test";
@@ -38,18 +39,45 @@ describe("PO Pilot Domain Engines", () => {
     assert.equal(waxTin.recommended_order_units, 0);
   });
 
-  it("parses US comma-formatted thousands ($1,250.50 / 1,400) and clamps negative CSV anomalies safely", () => {
+  it("parses US comma-formatted thousands, TSV/semicolon sheets, accounting negatives, and merges multi-location duplicate SKUs", () => {
     const csv = [
       "Variant SKU,Title,Vendor,On Hand,Committed,Units Sold,Cost per item,Variant Price",
-      'SKU-COMMA,"Heavy Rope","Acme","1,250","-4","3,000","$1,120.50","$2,500.00"'
+      'SKU-COMMA,"Heavy | Rope","Acme","1,250","-4","3,000","$1,120.50","$2,500.00"',
+      'SKU-COMMA,"Heavy | Rope","acme ","250","0","500","$1,120.50","$2,500.00"'
     ].join("\n");
     const signals = mapInventoryCsvToSignals(csv, 30);
-    assert.equal(signals.length, 1);
+    assert.equal(signals.length, 2);
     assert.equal(signals[0].on_hand, 1250);
     assert.equal(signals[0].committed, 0);
-    assert.equal(signals[0].units_sold_window, 3000);
-    assert.equal(signals[0].unit_cost_usd, 1120.5);
-    assert.equal(signals[0].retail_price_usd, 2500);
+
+    // Replenishment + PO builder must deduplicate multi-location SKU rows & merge vendor casing
+    const plan = computeReplenishmentPlan(signals, { serviceLevel: "95%", reviewPeriodDays: 14 });
+    assert.equal(plan.total_skus_analyzed, 1);
+    assert.equal(plan.items[0].inventory_position, 1500); // 1250 + 250 merged!
+
+    // Semicolon CSV + accounting negative "(6)" On Hand + 0 velocity backorder -> CRITICAL & C-class
+    const semiCsv = [
+      "Variant SKU;Title;Vendor;On Hand;Committed;Units Sold;Cost per item;Variant Price",
+      "SKU-BACKORDER; Custom Valve | Brass ;Indo Vendor;(6);2;0;$12.00;$30.00"
+    ].join("\n");
+    const semiSignals = mapInventoryCsvToSignals(semiCsv, 30);
+    assert.equal(semiSignals.length, 1);
+    assert.equal(semiSignals[0].on_hand, -6);
+    const backorderPlan = computeReplenishmentPlan(semiSignals);
+    assert.equal(backorderPlan.items[0].abc_class, "C");
+    assert.equal(backorderPlan.items[0].stockout_risk, "CRITICAL");
+    assert.ok(backorderPlan.items[0].recommended_order_units >= 8);
+
+    // Tab-separated (Google Sheets / Excel copy-paste) + pipe escaping in PO Markdown table
+    const tsv = [
+      "Variant SKU\tTitle\tVendor\tOn Hand\tUnits Sold\tCost per item\tVariant Price",
+      "SKU-TSV-1\tMug | 12oz\tVendor One\t0\t90\t5.00\t18.00",
+      "SKU-TSV-2\tCap | Lid\tvendor one \t0\t60\t2.00\t9.00"
+    ].join("\n");
+    const tsvPlan = computeReplenishmentPlan(mapInventoryCsvToSignals(tsv, 30));
+    const tsvPos = generateSupplierPurchaseOrders(tsvPlan.items, [], "PO-TSV");
+    assert.equal(tsvPos.purchase_orders.length, 1); // Case-insensitive vendor merge!
+    assert.ok(tsvPos.purchase_orders[0].vendor_email_markdown.includes("Mug \\| 12oz"));
   });
 
   it("enforces vendor USD minimum order value via A-item closed-form carton top-up (>500 cartons) and emits Shopify CSV", () => {
@@ -141,11 +169,22 @@ describe("PO Pilot Domain Engines", () => {
         { sku: "SKU-NEVER-ARRIVED", billed_qty: 50, billed_unit_cost_usd: 20 }
       ]
     });
-    // SKU-SPLIT received 60+40=100 ($1,000 ok), SKU-NEVER-ARRIVED received 0 ($1,000 overcharge!)
+    //SKU-SPLIT received 60+40=100 ($1,000 ok), SKU-NEVER-ARRIVED received 0 ($1,000 overcharge!)
     assert.equal(splitAndMissingAudit.verified_payable_amount_usd, 1000);
     assert.equal(splitAndMissingAudit.total_overcharge_recovered_usd, 1000);
     assert.equal(splitAndMissingAudit.discrepancies.length, 1);
     assert.equal(splitAndMissingAudit.discrepancies[0].sku, "SKU-NEVER-ARRIVED");
+
+    // Case-insensitive SKU matching between lowercase ERP PO and uppercase PDF invoice
+    const caseAudit = runThreeWayMatch({
+      po_number: "PO-CASE-1",
+      vendor: "Case Vendor",
+      po_lines: [{ sku: "ho-mug-12oz-blk", ordered_qty: 24, unit_cost_usd: 6.4 }],
+      receiving_lines: [{ sku: "Ho-Mug-12Oz-Blk", received_good_qty: 24, damaged_qty: 0 }],
+      invoice_lines: [{ sku: "HO-MUG-12OZ-BLK", billed_qty: 24, billed_unit_cost_usd: 6.4 }]
+    });
+    assert.equal(caseAudit.payment_recommendation, "APPROVE_IN_FULL");
+    assert.equal(caseAudit.discrepancies.length, 0);
   });
 
   it("reconstructs supplier lead times, lowercase headers, and newest-first chronological cost from Stocky CSV", () => {
@@ -365,6 +404,10 @@ describe("End-to-End MCP Stdio & Streamable HTTP + n8n Workflow Contracts", () =
       const healthRes = await fetch(`http://127.0.0.1:${port}/health`);
       assert.equal(healthRes.status, 200);
 
+      // Load-balancer / wget --spider HEAD probe must also return 200 OK (never 404!)
+      const headHealthRes = await fetch(`http://127.0.0.1:${port}/health`, { method: "HEAD" });
+      assert.equal(headHealthRes.status, 200);
+
       const cardRes = await fetch(`http://127.0.0.1:${port}/.well-known/mcp/server-card.json`);
       assert.equal(cardRes.status, 200);
       const cardJson = (await cardRes.json()) as { authentication: { optional_env: string[] } };
@@ -427,13 +470,31 @@ describe("End-to-End MCP Stdio & Streamable HTTP + n8n Workflow Contracts", () =
       });
       const rawMatchJson = await mcpMatchRes.json();
       const wf02 = JSON.parse(readFileSync("sales-bundle/n8n-templates/02-supplier-invoice-3way-match-guard.json", "utf8")) as {
-        nodes: Array<{ name: string; parameters: { jsCode?: string } }>;
+        nodes: Array<{ name: string; type: string; webhookId?: string; parameters: Record<string, unknown> }>;
       };
-      const code02 = wf02.nodes.find((n) => n.name === "Unpack Audit Verdict")?.parameters.jsCode;
+      const code02 = wf02.nodes.find((n) => n.name === "Unpack Audit Verdict")?.parameters.jsCode as string | undefined;
       assert.ok(code02);
       const run02 = new Function("$input", code02) as (inp: { first: () => { json: unknown } }) => Array<{ json: Record<string, unknown> }>;
       const out02 = run02({ first: () => ({ json: rawMatchJson }) });
       assert.equal(out02[0].json.payment_recommendation, "HOLD_AND_ISSUE_DEBIT_MEMO");
+
+      // Validate genuine n8n v2 IfV2, SlackV2 (__rl + select), and Webhook (webhookId) schemas on both $49 templates!
+      for (const wf of [wf01 as unknown as typeof wf02, wf02]) {
+        const ifNode = wf.nodes.find((n) => n.type === "n8n-nodes-base.if");
+        assert.ok(ifNode);
+        const conds = ifNode.parameters.conditions as { combinator?: string; conditions?: unknown[] };
+        assert.equal(conds.combinator, "and");
+        assert.ok(Array.isArray(conds.conditions) && conds.conditions.length === 1);
+
+        const slackNode = wf.nodes.find((n) => n.type === "n8n-nodes-base.slack");
+        assert.ok(slackNode);
+        assert.equal(slackNode.parameters.select, "channel");
+        const chId = slackNode.parameters.channelId as { __rl?: boolean; mode?: string };
+        assert.equal(chId.__rl, true);
+        assert.equal(chId.mode, "name");
+      }
+      const whNode = wf02.nodes.find((n) => n.type === "n8n-nodes-base.webhook");
+      assert.ok(whNode?.webhookId);
     } finally {
       proc.kill("SIGTERM");
     }
@@ -597,5 +658,63 @@ describe("Open-Core Entitlements & 25-SKU Urgency-Sorted Soft-Gate", () => {
     } finally {
       await licensedClient.close();
     }
+  });
+
+  it("executes scripts/mint-license.mjs CLI keypair generation, signing, and invalid tier rejection", async () => {
+    const keypairOut = execFileSync("node", ["scripts/mint-license.mjs", "--generate-keypair"], { encoding: "utf8" });
+    const lines = keypairOut.split("\n").map((l) => l.trim()).filter(Boolean);
+    const pubB64 = lines[2];
+    const privB64 = lines[4];
+    assert.ok(pubB64.length > 20 && privB64.length > 20);
+
+    const signedToken = execFileSync(
+      "node",
+      ["scripts/mint-license.mjs", "--sign", "--email", "buyer@brand.com", "--tier", "agency", "--days", "365"],
+      {
+        encoding: "utf8",
+        env: { ...process.env, PO_PILOT_SIGNING_PRIVATE_KEY_B64: privB64 }
+      }
+    ).trim();
+    assert.ok(signedToken.startsWith("POP1."));
+
+    clearEntitlementCache();
+    const verified = await resolveEntitlement({ licenseKey: signedToken, publicKeySpkiB64: pubB64 });
+    assert.equal(verified.unlocked, true);
+    assert.equal(verified.tier, "agency");
+
+    // Reject invalid --tier typos with non-zero exit code
+    assert.throws(() => {
+      execFileSync(
+        "node",
+        ["scripts/mint-license.mjs", "--sign", "--tier", "typo-tier"],
+        {
+          encoding: "utf8",
+          stdio: "pipe",
+          env: { ...process.env, PO_PILOT_SIGNING_PRIVATE_KEY_B64: privB64 }
+        }
+      );
+    });
+
+    // Reject expired ISO-date string `exp` tokens so legacy/manual string dates can NEVER bypass expiration
+    const isoExpiredPayload = Buffer.from(
+      JSON.stringify({ sub: "expired@brand.com", tier: "pro", exp: "2020-01-01" }),
+      "utf8"
+    ).toString("base64url");
+    const privObj = createPrivateKey({ key: Buffer.from(privB64, "base64"), format: "der", type: "pkcs8" });
+    const isoSig = sign(null, Buffer.from(isoExpiredPayload, "utf8"), privObj).toString("base64url");
+    clearEntitlementCache();
+    const expiredIsoCheck = await resolveEntitlement({
+      licenseKey: `POP1.${isoExpiredPayload}.${isoSig}`,
+      publicKeySpkiB64: pubB64
+    });
+    assert.equal(expiredIsoCheck.unlocked, false);
+    assert.equal(expiredIsoCheck.reason, "license_expired");
+
+    // Verify docker-compose.yml has valid official n8n registry host, pinned version (no :latest), and env access enabled for n8n 2.x
+    const composeText = readFileSync("docker-compose.yml", "utf8");
+    assert.ok(!composeText.includes("docker.n8nio.io"), "Must not contain typo domain docker.n8nio.io");
+    assert.ok(!composeText.includes(":latest"), "Must pin container image tag instead of mutable :latest");
+    assert.ok(composeText.includes("docker.n8n.io/n8nio/n8n:"));
+    assert.ok(composeText.includes("N8N_BLOCK_ENV_ACCESS_IN_NODE=false"));
   });
 });

@@ -41,21 +41,31 @@ export function generateSupplierPurchaseOrders(
   const ruleMap = new Map<string, SupplierRule>();
   for (const r of supplierRules) ruleMap.set(r.vendor.trim().toLowerCase(), r);
 
-  const byVendor = new Map<string, ReplenishmentItemResult[]>();
+  const byVendor = new Map<string, { displayVendor: string; items: ReplenishmentItemResult[] }>();
   for (const item of items) {
-    const bucket = byVendor.get(item.vendor) ?? [];
-    bucket.push(item);
-    byVendor.set(item.vendor, bucket);
+    const key = item.vendor.trim().toLowerCase() || "unassigned vendor";
+    const existing = byVendor.get(key);
+    if (!existing) {
+      const ruleDisplay = ruleMap.get(key)?.vendor.trim();
+      byVendor.set(key, {
+        displayVendor: ruleDisplay || item.vendor.trim() || "Unassigned Vendor",
+        items: [item]
+      });
+    } else {
+      existing.items.push(item);
+    }
   }
 
   const purchaseOrders: SupplierPurchaseOrder[] = [];
   let seq = 101;
 
-  for (const [vendor, vendorItems] of byVendor.entries()) {
+  for (const [vendorKey, group] of byVendor.entries()) {
+    const vendor = group.displayVendor;
+    const vendorItems = group.items;
     const actionable = vendorItems.filter((i) => i.recommended_order_units > 0);
     if (actionable.length === 0) continue;
 
-    const rule = ruleMap.get(vendor.trim().toLowerCase());
+    const rule = ruleMap.get(vendorKey);
     const minUnits = rule?.min_order_units ?? 0;
     const minUsd = rule?.min_order_value_usd ?? 0;
 
@@ -116,10 +126,11 @@ export function generateSupplierPurchaseOrders(
       lines.map((l) => ({ sku: l.sku, quantity: l.order_qty, unit_cost_usd: l.unit_cost_usd }))
     );
 
+    const escapeMd = (s: string): string => s.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
     const tableRows = lines
       .map(
         (l) =>
-          `| ${l.sku} | ${l.title} | ${l.cartons} (${l.case_pack}/ctn) | ${l.order_qty} | $${l.unit_cost_usd.toFixed(2)} | $${l.line_total_usd.toFixed(2)} |`
+          `| ${escapeMd(l.sku)} | ${escapeMd(l.title)} | ${l.cartons} (${l.case_pack}/ctn) | ${l.order_qty} | $${l.unit_cost_usd.toFixed(2)} | $${l.line_total_usd.toFixed(2)} |`
       )
       .join("\n");
 

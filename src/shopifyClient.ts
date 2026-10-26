@@ -148,7 +148,8 @@ export async function fetchLiveShopifySignals(
       for (const item of order.lineItems?.nodes ?? []) {
         const sku = item.sku?.trim();
         if (sku && item.quantity > 0) {
-          soldBySku.set(sku, (soldBySku.get(sku) ?? 0) + item.quantity);
+          const skuKey = sku.toUpperCase();
+          soldBySku.set(skuKey, (soldBySku.get(skuKey) ?? 0) + item.quantity);
         }
       }
     }
@@ -181,18 +182,19 @@ export async function fetchLiveShopifySignals(
     for (const v of variantData.productVariants?.nodes ?? []) {
       const sku = v.sku?.trim();
       if (!sku || v.product.status !== "ACTIVE") continue;
+      const skuKey = sku.toUpperCase();
       const retail = Math.max(0, Number(v.price) || 0);
       const rawCost = Number(v.inventoryItem?.unitCost?.amount);
       const unitCost = Number.isFinite(rawCost) && rawCost > 0 ? rawCost : Number((retail * 0.4).toFixed(2));
       const variantSuffix = v.title && v.title !== "Default Title" ? ` - ${v.title}` : "";
 
-      const existing = signalsBySku.get(sku);
+      const existing = signalsBySku.get(skuKey);
       if (existing) {
         existing.on_hand += v.inventoryQuantity ?? 0;
         continue;
       }
 
-      signalsBySku.set(sku, {
+      signalsBySku.set(skuKey, {
         sku,
         title: `${v.product.title}${variantSuffix}`,
         vendor: v.product.vendor || "Unassigned Vendor",
@@ -200,7 +202,7 @@ export async function fetchLiveShopifySignals(
         committed: 0,
         on_order: 0,
         backorders: 0,
-        units_sold_window: soldBySku.get(sku) ?? 0,
+        units_sold_window: soldBySku.get(skuKey) ?? 0,
         window_days: windowDays,
         stockout_days: 0,
         unit_cost_usd: unitCost,

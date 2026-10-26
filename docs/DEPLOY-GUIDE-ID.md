@@ -8,7 +8,7 @@ Ikuti urutan **6 langkah** di bawah ini karena beberapa registry saling membutuh
 
 ## Langkah 1: Push & Merge ke Branch `main` di GitHub
 
-Saat ini seluruh kode berada di working branch Arena (`arena/c9d6d95d-po-pilot-mcp`). Agar marketplace membaca kode Anda dari repo publik `https://github.com/maskchanel14-source/po-pilot-mcp`:
+Saat ini seluruh kode berada di working branch Arena (`arena/0a7ca7bf-po-pilot-mcp` — Pull Request `#3`). Agar marketplace membaca kode Anda dari repo publik `https://github.com/maskchanel14-source/po-pilot-mcp`:
 
 1. Commit & push branch ini lalu buat Pull Request ke `main` (bisa minta saya jalankan langsung di chat ini: *"tolong commit, push, dan buat/merge PR ke main"*).
 2. Pastikan repo GitHub berstatus **Public** agar skor inspeksi Glama, Smithery, dan GitHub OIDC berjalan gratis.

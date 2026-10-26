@@ -20,12 +20,14 @@ services:
       - SHOPIFY_ACCESS_TOKEN=${SHOPIFY_ACCESS_TOKEN:-}
 
   n8n:
-    image: docker.n8nio.io/n8nio/n8n:latest
+    image: docker.n8n.io/n8nio/n8n:2.44.6
     restart: unless-stopped
     ports:
       - "5678:5678"
     environment:
       - PO_PILOT_MCP_HTTP_URL=http://po-pilot-mcp:8080/mcp
+      - PO_PILOT_DEMO_MODE=${PO_PILOT_DEMO_MODE:-false}
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
     volumes:
       - n8n_data:/home/node/.n8n

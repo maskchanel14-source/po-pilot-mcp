@@ -47,6 +47,7 @@ Create a custom app in **Shopify Admin -> Settings -> Apps and sales channels ->
       "command": "npx",
       "args": ["-y", "po-pilot-mcp@1.0.0"],
       "env": {
+        "PO_PILOT_LICENSE_KEY": "your_polar_or_pop1_license_key",
         "SHOPIFY_STORE_DOMAIN": "your-store.myshopify.com",
         "SHOPIFY_ACCESS_TOKEN": "shpat_your_read_only_token"
       }
@@ -134,7 +135,7 @@ Run `reconcile_po_three_way_match` with `demo_mode: true`. Cross-check our origi
 ### Maintainer Publish & Deploy Commands
 
 ```bash
-# 1. Verify build, 11 automated tests, and zero security advisories
+# 1. Verify build, 12 automated tests, and zero security advisories
 npm test && npm audit
 
 # 2. Publish to npm
