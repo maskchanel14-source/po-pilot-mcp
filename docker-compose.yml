@@ -1,0 +1,35 @@
+# One-command local / VPS stack for PO Pilot MCP (HTTP) + n8n Automation
+# Run: docker compose up -d
+# Then open n8n at http://localhost:5678 and import both workflows from sales-bundle/n8n-templates/
+
+services:
+  po-pilot-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - TRANSPORT=http
+      - PORT=8080
+      - SHOPIFY_STORE_DOMAIN=${SHOPIFY_STORE_DOMAIN:-}
+      - SHOPIFY_ACCESS_TOKEN=${SHOPIFY_ACCESS_TOKEN:-}
+
+  n8n:
+    image: docker.n8nio.io/n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - PO_PILOT_MCP_HTTP_URL=http://po-pilot-mcp:8080/mcp
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      po-pilot-mcp:
+        condition: service_healthy
+
+volumes:
+  n8n_data:

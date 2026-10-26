@@ -1,0 +1,83 @@
+# MCPize Deployment & Monetization Manifest — https://mcpize.com
+# Deploy: npx mcpize login && npx mcpize deploy
+version: 1
+name: po-pilot-mcp
+displayName: "PO Pilot — Post-Stocky Shopify Purchase Orders & 3-Way Match"
+description: >-
+  Replaces Shopify Stocky's retired replenishment & purchasing workflow.
+  Computes stockout-adjusted velocity and Z-score safety stock, enforces
+  supplier MOQs and carton multiples, generates Shopify Native Draft PO CSVs,
+  recovers un-exportable supplier rules from Stocky CSVs, and runs Accounts
+  Payable 3-way match audits against vendor invoices.
+
+runtime: typescript
+entry: dist/index.js
+
+build:
+  install: npm ci
+  command: npm run build
+
+# Stdio bridge mode: MCPize wraps `node dist/index.js` over its managed Streamable HTTP gateway.
+# All credentials are OPTIONAL so install-time inspection and demo_mode work with zero friction.
+startCommand:
+  type: stdio
+  command: node dist/index.js
+
+credentials:
+  - name: SHOPIFY_STORE_DOMAIN
+    required: false
+    description: >-
+      Optional. Your Shopify store domain (e.g. your-store.myshopify.com) for
+      live Admin GraphQL pulls. Leave blank to use CSV inputs or demo_mode.
+    docs_url: https://help.shopify.com/en/manual/apps/app-types/custom-apps
+    mapping:
+      env: SHOPIFY_STORE_DOMAIN
+  - name: SHOPIFY_ACCESS_TOKEN
+    required: false
+    description: >-
+      Optional. Read-only Shopify Admin API token (shpat_...) with
+      read_products, read_inventory, and read_orders scopes.
+    docs_url: https://help.shopify.com/en/manual/apps/app-types/custom-apps
+    mapping:
+      env: SHOPIFY_ACCESS_TOKEN
+
+credentials_mode: per_user
+
+# Monetization: Free 1,000 requests/mo + Pro $19/mo (50,000 requests/mo)
+pricing:
+  model: freemium
+  currency: USD
+  tiers:
+    - name: free
+      price: 0
+      limits:
+        requests_per_month: 1000
+      features:
+        - all_4_workflow_tools
+        - stocky_csv_supplier_recovery
+        - demo_and_csv_modes
+    - name: pro
+      price: 19
+      interval: month
+      limits:
+        requests_per_month: 50000
+      features:
+        - live_shopify_admin_graphql
+        - multi_vendor_moq_optimization
+        - ap_three_way_match_debit_memos
+        - priority_support
+
+marketplace:
+  category: ecommerce-operations
+  license: MIT
+  repository: https://github.com/maskchanel14-source/po-pilot-mcp
+  homepage: https://github.com/maskchanel14-source/po-pilot-mcp#readme
+  tags:
+    - shopify
+    - purchase-orders
+    - stocky
+    - inventory-replenishment
+    - wholesale
+    - moq
+    - accounts-payable
+    - three-way-match

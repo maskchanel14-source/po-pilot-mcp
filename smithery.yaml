@@ -1,0 +1,25 @@
+# Smithery Registry Manifest — https://smithery.ai
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    additionalProperties: false
+    properties:
+      shopifyStoreDomain:
+        type: string
+        title: Shopify Store Domain (Optional)
+        description: "Optional *.myshopify.com domain for live Admin API reads. Omit for CSV or demo_mode."
+      shopifyAccessToken:
+        type: string
+        title: Shopify Admin Access Token (Optional)
+        description: "Optional shpat_... token with read_products, read_inventory, read_orders."
+  commandFunction: |-
+    (config) => ({
+      command: 'node',
+      args: ['dist/index.js'],
+      env: {
+        ...(config.shopifyStoreDomain ? { SHOPIFY_STORE_DOMAIN: config.shopifyStoreDomain } : {}),
+        ...(config.shopifyAccessToken ? { SHOPIFY_ACCESS_TOKEN: config.shopifyAccessToken } : {})
+      }
+    })
+  exampleConfig: {}

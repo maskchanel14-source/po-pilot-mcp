@@ -1,0 +1,63 @@
+{
+  "name": "po-pilot-mcp",
+  "version": "1.0.0",
+  "description": "Post-Stocky Shopify replenishment, MOQ/case-pack Purchase Order generator, Stocky CSV supplier recovery, and 3-way supplier invoice reconciliation MCP server.",
+  "mcpName": "io.github.maskchanel14-source/po-pilot-mcp",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "po-pilot-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "mcpize.yaml",
+    "smithery.yaml",
+    "glama.json",
+    "server.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/index.js",
+    "prepublishOnly": "npm test",
+    "start": "node dist/index.js",
+    "start:http": "node dist/index.js --http",
+    "test": "npm run build && node --test dist/tests/*.test.js"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "modelcontextprotocol",
+    "shopify",
+    "purchase-orders",
+    "stocky",
+    "inventory-replenishment",
+    "wholesale",
+    "moq",
+    "three-way-match",
+    "accounts-payable",
+    "ecommerce-ops"
+  ],
+  "author": "maskchanel14-source",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maskchanel14-source/po-pilot-mcp.git"
+  },
+  "homepage": "https://github.com/maskchanel14-source/po-pilot-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/maskchanel14-source/po-pilot-mcp/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}
