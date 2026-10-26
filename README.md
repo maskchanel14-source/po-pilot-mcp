@@ -1,10 +1,11 @@
 # PO Pilot MCP (`po-pilot-mcp`)
 
 [![npm v1.0.0](https://img.shields.io/badge/npm-po--pilot--mcp%401.0.0-cb3837.svg)](https://www.npmjs.com/package/po-pilot-mcp)
-[![Get Pro Kit ($49)](https://img.shields.io/badge/Polar.sh-Get_Pro_Kit_%2B_3_n8n_Workflows_(%2449)-10B981.svg)](https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV)
+[![Get Solo Kit ($49)](https://img.shields.io/badge/Polar.sh-Solo_Kit_%2B_3_n8n_Workflows_(%2449)-10B981.svg)](https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV)
+[![Get Agency 10-Store ($249)](https://img.shields.io/badge/Polar.sh-Agency_10--Store_Kit_(%24249)-F59E0B.svg)](https://buy.polar.sh/polar_cl_wrMfDFquV3H9rvyLRSzkpdN4I57zyCTBvYqfd04O82Y)
 [![Hosted Cloud ($0 / $29)](https://img.shields.io/badge/MCPize_Cloud-Try_Free_%2F_%2429_mo-6366F1.svg)](https://mcpize.com/mcp/po-pilot-mcp)
+[![Glama Grade A](https://img.shields.io/badge/Glama_Quality-Grade_A_Verified-22C55E.svg)](https://glama.ai/mcp/servers/maskchanel14-source/po-pilot-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Zero Required Secrets](https://img.shields.io/badge/Cold_Start-Zero_Keys_Required-success.svg)](mcpize.yaml)
 
 <p align="center">
   <a href="https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV">
@@ -13,11 +14,13 @@
 </p>
 
 <p align="center">
-  <a href="https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV"><strong>Unlock Unlimited Pro Kit + 3 n8n Workflows ($49 One-Time) →</strong></a>
+  <a href="https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV"><strong>Solo Pro Kit + 3 n8n Workflows ($49) →</strong></a>
   &nbsp;&nbsp;|&nbsp;&nbsp;
-  <a href="https://mcpize.com/mcp/po-pilot-mcp"><strong>Launch Zero-Install Hosted Cloud ($0 / $29 mo) →</strong></a>
+  <a href="https://buy.polar.sh/polar_cl_wrMfDFquV3H9rvyLRSzkpdN4I57zyCTBvYqfd04O82Y"><strong>Agency / 3PL 10-Store Suite ($249) →</strong></a>
   &nbsp;&nbsp;|&nbsp;&nbsp;
-  <a href="https://www.npmjs.com/package/po-pilot-mcp"><strong>Install via npm (`npx -y po-pilot-mcp@1.0.0`) →</strong></a>
+  <a href="https://mcpize.com/mcp/po-pilot-mcp"><strong>Hosted Cloud ($0 / $29 mo) →</strong></a>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="https://glama.ai/mcp/servers/maskchanel14-source/po-pilot-mcp"><strong>Glama (Grade A) →</strong></a>
 </p>
 
 **Post-Stocky replenishment math, Open-to-Buy & US tariff landed-cost Purchase Orders, Shopify POS barcode Transfer CSVs, Stocky CSV supplier recovery, and Accounts Payable 3-way invoice matching (with QuickBooks Online & Xero Bill CSV exports) for Shopify merchants and US wholesalers.**
@@ -125,7 +128,7 @@ Run `reconcile_po_three_way_match` with `demo_mode: true`. Cross-check our origi
    where $Z \in \{1.04, 1.28, 1.65, 1.96, 2.33\}$ for $85\%, 90\%, 95\%, 97.5\%, 99\%$ cycle service levels.
 4. **Periodic Review Order Quantity & Carton Rounding**:
    $$\text{ROP} = \lceil d \cdot \text{LT} + \text{SS} \rceil, \quad S = \lceil d \cdot (\text{LT} + R) + \text{SS} \rceil$$
-   When $\text{IP} \le \text{ROP}$, raw order need $Q_0 = \max(\text{SKU\_MOQ}, S - \text{IP})$ is rounded to carton multiples $\lceil Q_0 / \text{CasePack} \rceil \times \text{CasePack}$. If a vendor PO falls short of `min_order_value_usd` (such as a $2,200 wholesale minimum or free-freight tier), the engine adds carton increments to the highest-velocity A-class SKU rather than padding slow C-items.
+   When $\text{IP} \le \text{ROP}$, raw order need $Q_0 = \max(\text{SKU-MOQ}, S - \text{IP})$ is rounded to carton multiples $\lceil Q_0 / \text{CasePack} \rceil \times \text{CasePack}$. If a vendor PO falls short of `min_order_value_usd` (such as a $2,200 wholesale minimum or free-freight tier), the engine adds carton increments to the highest-velocity A-class SKU rather than padding slow C-items.
 
 ---
 
@@ -141,10 +144,10 @@ Run `reconcile_po_three_way_match` with `demo_mode: true`. Cross-check our origi
 ## Pricing & Entitlements
 
 - **Local Free Sandbox ([`npx -y po-pilot-mcp@1.0.0`](https://www.npmjs.com/package/po-pilot-mcp))**: `$0` — unlimited Stocky CSV supplier recovery (`migrate_stocky_csv_snapshot`), full `demo_mode`, and up to **25 SKUs / 15 unique invoice SKUs per call** via CSV or JSON.
-- **Self-Hosted Lifetime Licenses + 3 n8n Automation Workflows ([Buy on Polar.sh →](https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV))**:
+- **Self-Hosted Lifetime Licenses + 3 n8n Automation Workflows ([Solo $49 →](https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV) | [Agency $249 →](https://buy.polar.sh/polar_cl_wrMfDFquV3H9rvyLRSzkpdN4I57zyCTBvYqfd04O82Y))**:
   - **[Early-Bird Launch — `$49` one-time (First 25 Buyers)](https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV)**: `Solo Store Unlimited` — 1 Shopify store, Unlimited SKUs & invoice lines, Live Shopify Admin GraphQL, Open-to-Buy cashflow optimizer, and all **3 ready-to-import n8n workflows** (`#01`, `#02`, `#03`) via `PO_PILOT_LICENSE_KEY`.
   - **Regular Solo Store**: **`$99` one-time** (after first 25 launch licenses).
-  - **3PL / Fractional CFO / Agency License**: **`$249` one-time** (up to **10 client Shopify stores** + multi-warehouse & QuickBooks/Xero AP workflow deployment rights).
+  - **[3PL / Fractional CFO / Agency License — `$249` one-time](https://buy.polar.sh/polar_cl_wrMfDFquV3H9rvyLRSzkpdN4I57zyCTBvYqfd04O82Y)**: Authorized for up to **10 client Shopify stores** + multi-warehouse & QuickBooks/Xero AP workflow deployment rights.
 - **MCPize Managed Cloud ([Subscribe on MCPize →](https://mcpize.com/mcp/po-pilot-mcp))**:
   - **[Free Sandbox (`$0/month`)](https://mcpize.com/mcp/po-pilot-mcp)** — **15 requests/month** (instant zero-setup evaluation).
   - **[Cloud Pro (`$29/month`)](https://mcpize.com/mcp/po-pilot-mcp)** — **500 requests/month** (unlimited SKUs + Live Shopify sync + Landed Cost/OTB + QBO/Xero Bill CSVs).

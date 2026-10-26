@@ -12,6 +12,7 @@ import {
   FREE_LOCAL_MAX_INVOICE_LINES,
   FREE_LOCAL_MAX_SKUS,
   MCPIZE_CLOUD_URL,
+  POLAR_AGENCY_CHECKOUT_URL,
   POLAR_SOLO_CHECKOUT_URL,
   resolveEntitlement,
   UPGRADE_NOTICE
@@ -77,6 +78,7 @@ function formatUpgradeRequired(toolName: string, feature: string) {
               regular_lifetime_solo_usd: 99,
               lifetime_agency_10_stores_usd: 249,
               polar_checkout_url: POLAR_SOLO_CHECKOUT_URL,
+              polar_agency_checkout_url: POLAR_AGENCY_CHECKOUT_URL,
               cloud_pro_monthly_usd: 29,
               cloud_agency_monthly_usd: 79,
               mcpize_cloud_url: MCPIZE_CLOUD_URL,
