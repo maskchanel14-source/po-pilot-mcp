@@ -10,8 +10,13 @@ export const FREE_LOCAL_MAX_INVOICE_LINES = 15;
  */
 export const DEFAULT_PUBLIC_KEY_SPKI_B64 = "";
 
+export const DEFAULT_POLAR_ORGANIZATION_ID = "451b88fb-d285-4c16-b86c-9a8cb33fb09c";
+export const POLAR_SOLO_CHECKOUT_URL =
+  "https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV";
+export const MCPIZE_CLOUD_URL = "https://mcpize.com/mcp/po-pilot-mcp";
+
 export const UPGRADE_NOTICE =
-  "Free Local Sandbox processes up to 25 SKUs (and 15 invoice lines) per call. Unlock Unlimited SKUs, full catalog PO runs, Open-to-Buy cashflow optimization, and Live Shopify Admin GraphQL with a $49 Early-Bird License Key on Polar.sh ($99 regular Solo / $249 Agency — set PO_PILOT_LICENSE_KEY) or subscribe to PO Pilot Cloud Pro ($29/mo, 500 req/mo) / Agency ($79/mo, 3,000 req/mo) on MCPize.";
+  `Free Local Sandbox processes up to 25 SKUs (and 15 invoice lines) per call. Unlock Unlimited SKUs, full catalog PO runs, Open-to-Buy cashflow optimization, 3 pre-built n8n workflows, and Live Shopify Admin GraphQL with a $49 Early-Bird License Key on Polar.sh (${POLAR_SOLO_CHECKOUT_URL} — set PO_PILOT_LICENSE_KEY) or subscribe to PO Pilot Cloud Pro ($29/mo) / Agency ($79/mo) on MCPize (${MCPIZE_CLOUD_URL}).`;
 
 export interface LicensePayload {
   sub: string;
@@ -168,7 +173,12 @@ export async function resolveEntitlement(options?: {
       process.env.PO_PILOT_PUBLIC_KEY_SPKI_B64 ??
       DEFAULT_PUBLIC_KEY_SPKI_B64
   );
-  const polarOrgEnv = stripEnvQuotes(options?.polarOrganizationId ?? process.env.POLAR_ORGANIZATION_ID ?? "");
+  const polarOrgEnv = stripEnvQuotes(
+    options?.polarOrganizationId ??
+      process.env.PO_PILOT_POLAR_ORG_ID ??
+      process.env.POLAR_ORGANIZATION_ID ??
+      DEFAULT_POLAR_ORGANIZATION_ID
+  );
   const polarBase = stripEnvQuotes(options?.polarApiBaseUrl ?? process.env.POLAR_API_BASE_URL ?? "https://api.polar.sh");
 
   const cacheKey = `${rawKey}|${polarOrgEnv}|${publicKeySpkiB64}|${polarBase}`;
