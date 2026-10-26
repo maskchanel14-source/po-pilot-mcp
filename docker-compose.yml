@@ -1,6 +1,6 @@
 # One-command local / VPS stack for PO Pilot MCP (HTTP) + n8n Automation
 # Run: docker compose up -d
-# Then open n8n at http://localhost:5678 and import both workflows from sales-bundle/n8n-templates/
+# Then open n8n at http://localhost:5678 and import all 3 workflows from sales-bundle/n8n-templates/
 
 services:
   po-pilot-mcp:

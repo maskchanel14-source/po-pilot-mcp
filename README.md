@@ -5,7 +5,7 @@
 [![MCP SDK 1.32.2](https://img.shields.io/badge/MCP_SDK-1.32.2-purple.svg)](package.json)
 [![Zero Required Secrets](https://img.shields.io/badge/Cold_Start-Zero_Keys_Required-success.svg)](mcpize.yaml)
 
-**Post-Stocky replenishment math, vendor MOQ Purchase Orders, Stocky CSV supplier recovery, and Accounts Payable 3-way invoice matching for Shopify merchants and US wholesalers.**
+**Post-Stocky replenishment math, Open-to-Buy & US tariff landed-cost Purchase Orders, Shopify POS barcode Transfer CSVs, Stocky CSV supplier recovery, and Accounts Payable 3-way invoice matching (with QuickBooks Online & Xero Bill CSV exports) for Shopify merchants and US wholesalers.**
 
 Shopify retired **Stocky** on August 31, 2026. Native Shopify Admin stores inventory counts and draft PO records, yet drops the purchasing logic merchants relied on: reorder point calculation, carton/case-pack rounding, vendor minimum order thresholds, supplier export, and invoice discrepancy checks. Meanwhile, Shopify's official Storefront and UCP MCP endpoints (`catalog`, `cart`, `checkout`, `policies`) serve front-office shoppers only.
 
@@ -67,12 +67,12 @@ npx -y po-pilot-mcp@1.0.0 --http
 
 ## 3 Copy-Paste Prompts (Test Immediately)
 
-### Prompt 1: Monday Morning Vendor PO Run (Zero API Keys Needed)
+### Prompt 1: Monday Morning Vendor PO Run + Landed Cost + POS Barcode CSV (Zero API Keys Needed)
 ```text
-Use po-pilot to run `build_supplier_purchase_orders` with `demo_mode: true` and `service_level: "95%"`. Show me:
+Use po-pilot to run `build_supplier_purchase_orders` with `demo_mode: true`, `service_level: "95%"`, and `max_cash_budget_usd: 3800`. Show me:
 1. Which SKUs are at CRITICAL stockout risk after adjusting for past stockout days,
-2. Which suppliers required an automatic carton top-up on A-class SKUs to hit their minimum dollar order,
-3. The exact CSV block I can import into Shopify Admin -> Purchase Orders, and
+2. True landed unit costs after US import tariffs + freight (and any margin-erosion warnings) plus how Open-to-Buy rationed cartons under my $3,800 cash cap,
+3. Both the Shopify Admin Draft PO CSV (`SKU,Supplier SKU,Quantity,Cost,Tax %`) and the Shopify POS Inventory Transfer CSV (`SKU,Barcode,Quantity`), and
 4. The ready-to-send PO emails for each vendor.
 ```
 
@@ -81,9 +81,9 @@ Use po-pilot to run `build_supplier_purchase_orders` with `demo_mode: true` and 
 Shopify Stocky never exported our supplier directory before shutting down. Run `migrate_stocky_csv_snapshot` with `demo_mode: true` (or use the Stocky Purchase Orders CSV I paste below) to reconstruct each vendor's real observed lead time in days, inferred carton pack sizes, latest unit costs, and a ready `supplier_rules` JSON configuration.
 ```
 
-### Prompt 3: Finance Ops 3-Way Match Audit (PO vs Receiving vs Vendor Invoice)
+### Prompt 3: Finance Ops 3-Way Match Audit + QuickBooks/Xero Verified Bill CSV
 ```text
-Run `reconcile_po_three_way_match` with `demo_mode: true`. Cross-check our original Purchase Order against warehouse dock receiving counts and the supplier's billed invoice. List every unit-price overcharge, short-shipment billed in full, unapproved surcharge, and freight cap overage, then give me the verified USD amount to pay plus the Debit Memo email to send their AR team.
+Run `reconcile_po_three_way_match` with `demo_mode: true`. Cross-check our original Purchase Order against warehouse dock receiving counts and the supplier's billed invoice. List every unit-price overcharge, short-shipment billed in full, unapproved surcharge, and freight cap overage, then give me the verified USD amount to pay ($2,386.20), the ready-to-import QuickBooks Online & Xero Bill CSVs (excluding unapproved fees), and the Debit Memo email to send their AR team.
 ```
 
 ---
@@ -93,8 +93,8 @@ Run `reconcile_po_three_way_match` with `demo_mode: true`. Cross-check our origi
 | Tool Name | Purpose | Inputs | Key Outputs | Annotations |
 | --- | --- | --- | --- | --- |
 | `calculate_replenishment_plan` | Margin-weighted ABC classification, stockout-adjusted daily velocity, Z-score safety stock, and reorder points | `skus[]`, `inventory_csv`, `use_live_shopify`, `demo_mode`, `service_level`, `review_period_days` | Per-SKU `abc_class`, `inventory_position`, `safety_stock_units`, `reorder_point_units`, `recommended_order_units`, `stockout_risk` | `readOnlyHint: true`, `idempotentHint: true` |
-| `build_supplier_purchase_orders` | Groups SKUs per vendor, rounds up to carton multiples, enforces vendor unit/USD minimums via A-SKU top-ups, and formats Shopify Draft PO CSVs | Same as above + `supplier_rules[]`, `po_prefix` | Per-vendor `shopify_draft_po_csv`, `vendor_email_markdown`, `subtotal_usd`, `moq_top_up_applied` | `readOnlyHint: true`, `idempotentHint: true` |
-| `reconcile_po_three_way_match` | Accounts Payable 3-way match comparing PO vs warehouse receiving vs supplier invoice | `po_number`, `vendor`, `po_lines[]`, `receiving_lines[]`, `invoice_lines[]`, `agreed_freight_cap_usd`, `demo_mode` | `payment_recommendation`, `verified_payable_amount_usd`, `total_overcharge_recovered_usd`, `discrepancies[]`, `debit_memo_email_markdown` | `readOnlyHint: true`, `idempotentHint: true` |
+| `build_supplier_purchase_orders` | Groups SKUs per vendor, rounds cartons, enforces vendor MOQs, computes US tariff + freight landed cost, enforces Open-to-Buy (`max_cash_budget_usd`) cash caps, and emits Shopify PO + POS Transfer CSVs | Same as above + `supplier_rules[]`, `po_prefix`, `max_cash_budget_usd`, `default_import_duty_pct`, `min_gross_margin_pct` | Per-vendor `shopify_draft_po_csv`, `shopify_transfer_import_csv`, `total_landed_cost_usd`, `otb_summary`, `vendor_email_markdown` | `readOnlyHint: true`, `idempotentHint: true` |
+| `reconcile_po_three_way_match` | Accounts Payable 3-way match comparing PO vs warehouse receiving vs supplier invoice + accounting CSV export | `po_number`, `vendor`, `invoice_number`, `invoice_date`, `due_date`, `po_lines[]`, `receiving_lines[]`, `invoice_lines[]`, `agreed_freight_cap_usd`, `demo_mode` | `payment_recommendation`, `verified_payable_amount_usd`, `total_overcharge_recovered_usd`, `quickbooks_bill_csv`, `xero_bill_csv`, `debit_memo_email_markdown` | `readOnlyHint: true`, `idempotentHint: true` |
 | `migrate_stocky_csv_snapshot` | Rebuilds supplier profiles, real lead-time averages/std-dev, and carton multiples from Stocky PO CSV exports | `stocky_po_csv`, `demo_mode` | `profiles[]`, `ready_supplier_rules_json[]`, `suppliers_recovered`, `skus_recovered` | `readOnlyHint: true`, `idempotentHint: true` |
 
 ---
@@ -126,16 +126,19 @@ Run `reconcile_po_three_way_match` with `demo_mode: true`. Cross-check our origi
 ## Pricing & Entitlements (`mcpize.yaml`)
 
 - **Local Free Sandbox (`npx -y po-pilot-mcp`)**: `$0` — unlimited Stocky CSV supplier recovery (`migrate_stocky_csv_snapshot`), full `demo_mode`, and up to **25 SKUs / 15 invoice lines per call** via CSV or JSON.
-- **Self-Hosted Lifetime Kit ($49 one-time on Polar.sh / Gumroad)**: Unlocks **Unlimited SKUs**, **Live Shopify Admin GraphQL**, and includes **2 ready-to-import n8n workflows** (Monday Morning Slack/Email PO Generator + Supplier Invoice 3-Way Match Guard) via `PO_PILOT_LICENSE_KEY`.
+- **Self-Hosted Lifetime Licenses + 3 n8n Automation Workflows (Polar.sh / Gumroad)**:
+  - **Early-Bird Launch (First 25 Buyers)**: **`$49` one-time** (`Solo Store Unlimited` — 1 Shopify store, Unlimited SKUs & invoice lines, Live Shopify Admin GraphQL, Open-to-Buy cashflow optimizer, and all **3 ready-to-import n8n workflows** `#01`, `#02`, `#03` via `PO_PILOT_LICENSE_KEY`).
+  - **Regular Solo Store**: **`$99` one-time** (after first 25 launch licenses).
+  - **3PL / Fractional CFO / Agency License**: **`$249` one-time** (up to **10 client Shopify stores** + multi-warehouse & QuickBooks/Xero AP workflow deployment rights).
 - **MCPize Managed Cloud**:
   - **Free Sandbox**: `$0/month` — **15 requests/month** (instant zero-setup evaluation).
-  - **Pro Store**: `$19/month` — **300 requests/month** (unlimited SKUs + Live Shopify sync for weekly store purchasing & AP invoice audits).
-  - **Agency / Multi-Store**: `$59/month` — **2,500 requests/month** (for multi-brand operators, aggregators, and daily automated n8n monitors).
+  - **Cloud Pro**: `$29/month` — **500 requests/month** (unlimited SKUs + Live Shopify sync + Landed Cost/OTB + QBO/Xero Bill CSVs).
+  - **Cloud Agency / 3PL**: `$79/month` — **3,000 requests/month** (for multi-brand operators, 3PLs, and automated n8n AP monitors).
 
 ### Maintainer Publish & Deploy Commands
 
 ```bash
-# 1. Verify build, 12 automated tests, and zero security advisories
+# 1. Verify build, automated test suite, and zero security advisories
 npm test && npm audit
 
 # 2. Publish to npm

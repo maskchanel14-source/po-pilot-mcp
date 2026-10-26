@@ -71,9 +71,11 @@ function formatUpgradeRequired(toolName: string, feature: string) {
             how_to_test_free_now:
               "Pass `demo_mode: true` or paste up to 25 SKUs via `inventory_csv` / `skus` to run PO math immediately at $0.",
             upgrade_options: {
-              self_hosted_lifetime_kit_usd: 49,
-              cloud_pro_monthly_usd: 19,
-              cloud_agency_monthly_usd: 59,
+              early_bird_lifetime_solo_usd: 49,
+              regular_lifetime_solo_usd: 99,
+              lifetime_agency_10_stores_usd: 249,
+              cloud_pro_monthly_usd: 29,
+              cloud_agency_monthly_usd: 79,
               env_var: "PO_PILOT_LICENSE_KEY"
             }
           },
@@ -263,22 +265,40 @@ export function createPoPilotServer(): McpServer {
     }
   );
 
-  // Tool 2: Vendor MOQ Purchase Order & Shopify Draft PO CSV Builder
+  // Tool 2: Vendor MOQ Purchase Order, Landed Cost, OTB & Shopify PO/Transfer CSV Builder
   server.registerTool(
     "build_supplier_purchase_orders",
     {
-      title: "Build MOQ-Compliant Supplier POs & Shopify Draft PO CSVs",
+      title: "Build MOQ-Compliant Supplier POs, Landed Costs, OTB & Shopify PO/Transfer CSVs",
       description:
-        "Turns SKU demand signals into ready-to-send Purchase Orders grouped by vendor. Enforces carton/case-pack multiples, per-SKU MOQs, and supplier-level minimum units or minimum dollar order thresholds (smartly topping up fastest-moving A-class SKUs to hit free-freight or vendor minimums without buying dead stock). Outputs both ready-to-import Shopify Native Draft PO CSV (`SKU,Supplier SKU,Quantity,Cost,Tax %`) and formatted vendor PO emails.",
+        "Turns SKU demand signals into ready-to-send Purchase Orders grouped by vendor. Enforces carton/case-pack multiples, per-SKU MOQs, supplier-level minimum units/USD thresholds (topping up A-class SKUs first), US import tariff + freight landed unit costs with margin-erosion alerts, and optional Open-to-Buy (`max_cash_budget_usd`) cashflow rationing. Outputs ready-to-import Shopify Native Draft PO CSV (`SKU,Supplier SKU,Quantity,Cost,Tax %`), Shopify POS Inventory Transfers CSV (`SKU,Barcode,Quantity`), and formatted vendor PO emails.",
       inputSchema: {
         skus: z.array(SkuSignalSchema).max(2500).optional().describe("Structured SKU inventory + velocity rows."),
         inventory_csv: z.string().max(2_000_000).optional().describe("Raw Shopify Products/Inventory CSV text."),
-        supplier_rules: z.array(SupplierRuleSchema).max(500).optional().describe("Per-vendor MOQ, minimum USD spend, lead time override, payment terms, email, and ship-to location rules."),
-        use_live_shopify: z.boolean().default(false).describe("Pull live store SKUs from Shopify Admin GraphQL (Pro / License)."),
+        supplier_rules: z.array(SupplierRuleSchema).max(500).optional().describe("Per-vendor MOQ, minimum USD spend, import tariff %, freight USD, lead time override, payment terms, email, and ship-to location rules."),
+        use_live_shopify: z.boolean().default(false).describe("Pull live store SKUs and barcodes from Shopify Admin GraphQL (Pro / License)."),
         demo_mode: z.boolean().default(false).describe("Generate full multi-vendor POs using the built-in Austin, TX merchant demo dataset."),
         service_level: ServiceLevelSchema,
         review_period_days: z.number().int().min(1).max(180).default(14).describe("Days of forward cover to buy beyond lead time."),
-        po_prefix: z.string().min(1).max(40).default("PO-2026").describe("Prefix for generated Purchase Order numbers.")
+        po_prefix: z.string().min(1).max(40).default("PO-2026").describe("Prefix for generated Purchase Order numbers."),
+        max_cash_budget_usd: z
+          .number()
+          .min(0)
+          .max(100000000)
+          .optional()
+          .describe("Optional Open-to-Buy (OTB) maximum landed cash spend ceiling in USD across all generated POs. Trims lowest-priority C/B cartons first while protecting CRITICAL A-class SKUs."),
+        default_import_duty_pct: z
+          .number()
+          .min(0)
+          .max(200)
+          .default(0)
+          .describe("Fallback US import tariff / customs duty % when not specified on a vendor's supplier_rules entry."),
+        min_gross_margin_pct: z
+          .number()
+          .min(0)
+          .max(99)
+          .default(40)
+          .describe("Minimum acceptable landed gross margin % before triggering `margin_erosion_warning: true` on a PO line.")
       },
       annotations: {
         readOnlyHint: true,
@@ -299,7 +319,11 @@ export function createPoPilotServer(): McpServer {
           serviceLevel: args.service_level,
           reviewPeriodDays: args.review_period_days
         });
-        const poBundle = generateSupplierPurchaseOrders(plan.items, rules, args.po_prefix);
+        const poBundle = generateSupplierPurchaseOrders(plan.items, rules, args.po_prefix, {
+          maxCashBudgetUsd: args.max_cash_budget_usd,
+          defaultImportDutyPct: args.default_import_duty_pct,
+          minGrossMarginPct: args.min_gross_margin_pct
+        });
 
         return {
           content: [
@@ -313,6 +337,8 @@ export function createPoPilotServer(): McpServer {
                   ...truncationMeta,
                   purchase_orders_count: poBundle.purchase_orders.length,
                   total_po_spend_usd: poBundle.total_po_spend_usd,
+                  total_landed_po_spend_usd: poBundle.total_landed_po_spend_usd,
+                  ...(poBundle.otb_summary ? { otb_summary: poBundle.otb_summary } : {}),
                   purchase_orders: poBundle.purchase_orders
                 },
                 null,
@@ -330,16 +356,22 @@ export function createPoPilotServer(): McpServer {
     }
   );
 
-  // Tool 3: Accounts Payable 3-Way Match Audit
+  // Tool 3: Accounts Payable 3-Way Match Audit + QuickBooks/Xero Bill CSV Generator
   server.registerTool(
     "reconcile_po_three_way_match",
     {
-      title: "Audit PO vs Warehouse Receiving vs Supplier Invoice (3-Way Match)",
+      title: "Audit PO vs Receiving vs Supplier Invoice (3-Way Match + QuickBooks/Xero CSVs)",
       description:
-        "Deterministic Finance Ops 3-way match engine for wholesalers and Shopify merchants. Cross-examines approved Purchase Order lines, warehouse dock receiving counts (good vs damaged units), and billed supplier invoice lines to catch silent unit-price creep, short-shipments billed in full, unapproved surcharges, and freight cap overages. Free Local Sandbox audits up to 15 invoice lines per call; Pro/License unlocks unlimited invoice audits.",
+        "Deterministic Finance Ops 3-way match engine for wholesalers and Shopify merchants. Cross-examines approved Purchase Order lines, warehouse dock receiving counts (good vs damaged units), and billed supplier invoice lines to catch silent unit-price creep, short-shipments billed in full, unapproved surcharges, and freight cap overages. Emits ready-to-import QuickBooks Online (`quickbooks_bill_csv`) and Xero (`xero_bill_csv`) Purchase Bill CSVs containing ONLY verified payable quantities and unit costs, plus a vendor Debit Memo email. Free Local Sandbox audits up to 15 invoice lines per call; Pro/License unlocks unlimited invoice audits.",
       inputSchema: {
         po_number: z.string().max(80).default("PO-2026-1042").describe("Purchase Order reference number."),
         vendor: z.string().max(160).default("Supplier").describe("Vendor or distributor name."),
+        invoice_number: z.string().max(80).optional().describe("Supplier invoice number for QuickBooks/Xero Bill CSV export (defaults to INV-<po_number>)."),
+        invoice_date: z.string().max(20).optional().describe("Invoice date in YYYY-MM-DD format (defaults to today UTC)."),
+        due_date: z.string().max(20).optional().describe("Bill due date in YYYY-MM-DD format (defaults to Net 30 from invoice_date)."),
+        currency: z.string().length(3).default("USD").describe("3-letter ISO currency code for QuickBooks/Xero export."),
+        qbo_expense_account: z.string().max(120).optional().describe("QuickBooks Online expense/COGS account name (defaults to 'Cost of Goods Sold')."),
+        xero_account_code: z.string().max(40).optional().describe("Xero chart-of-accounts code for inventory/COGS lines (defaults to '310')."),
         po_lines: z.array(PoLineSchema).max(2000).optional().describe("Approved Purchase Order line items."),
         receiving_lines: z.array(ReceivingLineSchema).max(2000).optional().describe("Warehouse receiving counts per SKU."),
         invoice_lines: z.array(InvoiceLineSchema).max(2000).optional().describe("Billed lines extracted from the supplier PDF/CSV invoice."),
@@ -357,11 +389,20 @@ export function createPoPilotServer(): McpServer {
     async (args) => {
       try {
         const entitlement = await resolveEntitlement();
+        const accountingMeta = {
+          invoice_number: args.invoice_number,
+          invoice_date: args.invoice_date,
+          due_date: args.due_date,
+          currency: args.currency,
+          qbo_expense_account: args.qbo_expense_account,
+          xero_account_code: args.xero_account_code
+        };
         const basePayload = args.demo_mode
-          ? DEMO_THREE_WAY_MATCH
+          ? { ...DEMO_THREE_WAY_MATCH, ...accountingMeta }
           : {
               po_number: args.po_number,
               vendor: args.vendor,
+              ...accountingMeta,
               po_lines: args.po_lines ?? [],
               receiving_lines: args.receiving_lines ?? [],
               invoice_lines: args.invoice_lines ?? [],
@@ -477,16 +518,23 @@ export function createPoPilotServer(): McpServer {
           uri: uri.href,
           mimeType: "text/markdown",
           text: [
-            "# Shopify Admin Native Draft PO CSV Specification (Post-Stocky 2026)",
+            "# Shopify & Accounting CSV Import Specifications (Post-Stocky 2026)",
             "",
-            "Columns generated by `build_supplier_purchase_orders`:",
-            "- `SKU` (exact Variant SKU in Shopify Admin)",
-            "- `Supplier SKU` (vendor catalog code)",
-            "- `Quantity` (positive integer rounded to vendor carton multiple)",
-            "- `Cost` (unit cost in store currency, e.g. `6.40`)",
-            "- `Tax %` (optional tax percentage, e.g. `0.00`)",
+            "## 1. Shopify Admin Draft Purchase Order CSV (`shopify_draft_po_csv`)",
+            "- Header: `SKU,Supplier SKU,Quantity,Cost,Tax %`",
+            "- Upload path: **Shopify Admin → Products → Purchase orders → Create purchase order → Import**.",
             "",
-            "Upload path: **Shopify Admin → Products → Purchase orders → Create purchase order → Add products → Import CSV**."
+            "## 2. Shopify Admin Inventory Transfers & POS Barcode CSV (`shopify_transfer_import_csv`)",
+            "- Header: `SKU,Barcode,Quantity` (matches official `add_products_template.csv`)",
+            "- Upload path: **Shopify Admin → Products → Transfers → Create transfer → Import** (enables Shopify POS barcode scanner receiving & barcode label printing).",
+            "",
+            "## 3. QuickBooks Online Verified Bill CSV (`quickbooks_bill_csv`)",
+            "- Header: `BillNo,Supplier,BillDate,DueDate,LineDescription,LineAmount,Account,LineTaxCode,Currency`",
+            "- Contains ONLY verified 3-way matched quantities, agreed PO unit prices, and capped freight.",
+            "",
+            "## 4. Xero Purchase Bill CSV (`xero_bill_csv`)",
+            "- Header: `*ContactName,*InvoiceNumber,*InvoiceDate,*DueDate,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,Currency`",
+            "- Upload path: **Xero → Business → Bills to pay → Import**."
           ].join("\n")
         }
       ]

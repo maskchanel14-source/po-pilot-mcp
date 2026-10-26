@@ -11,7 +11,7 @@ export const FREE_LOCAL_MAX_INVOICE_LINES = 15;
 export const DEFAULT_PUBLIC_KEY_SPKI_B64 = "";
 
 export const UPGRADE_NOTICE =
-  "Free Local Sandbox processes up to 25 SKUs (and 15 invoice lines) per call. Unlock Unlimited SKUs, full catalog PO runs, and Live Shopify Admin GraphQL with a $49 one-time License Key on Polar.sh (set PO_PILOT_LICENSE_KEY) or subscribe to PO Pilot Cloud Pro ($19/mo, 300 req/mo) / Agency ($59/mo, 2,500 req/mo) on MCPize.";
+  "Free Local Sandbox processes up to 25 SKUs (and 15 invoice lines) per call. Unlock Unlimited SKUs, full catalog PO runs, Open-to-Buy cashflow optimization, and Live Shopify Admin GraphQL with a $49 Early-Bird License Key on Polar.sh ($99 regular Solo / $249 Agency — set PO_PILOT_LICENSE_KEY) or subscribe to PO Pilot Cloud Pro ($29/mo, 500 req/mo) / Agency ($79/mo, 3,000 req/mo) on MCPize.";
 
 export interface LicensePayload {
   sub: string;

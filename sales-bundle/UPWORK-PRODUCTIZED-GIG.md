@@ -1,27 +1,28 @@
-# Upwork Productized Service ($500 – $1,500 USD)
+# Upwork & Contra Productized Service ($750 – $2,500 USD)
 
 *Crafted with `marketing-campaign`, `avoid-ai-writing`, and `finance-billing-ops` skills.*
 
 ---
 
 ## Project Catalog Title (Max 75 chars)
-**Shopify Post-Stocky Purchase Order, MOQ & 3-Way Match AI Automation**
+**Shopify Post-Stocky PO, Landed Cost OTB & QuickBooks/Xero 3-Way Match**
 
 ### Alternative Search-Optimized Title (Direct Proposals)
-**Replace Shopify Stocky: Automated Vendor POs, MOQ Math & AP Invoice Audit**
+**Replace Shopify Stocky: Automated POs, POS Transfers & AP Invoice 3-Way Match**
 
 ---
 
-## Tiered Pricing Packages (Upwork Project Catalog)
+## Tiered Pricing Packages (Upwork Project Catalog / Contra)
 
-| Deliverable | Starter ($500) | Growth Ops ($950) | Multi-Warehouse + AP ($1,500) |
+| Deliverable | Starter ($750) | Growth Ops ($1,450) | Multi-Warehouse + AP ($2,500) |
 | --- | --- | --- | --- |
 | **Delivery Time** | 3 Business Days | 5 Business Days | 10 Business Days |
-| **Stocky CSV Supplier & Lead-Time Recovery** | Up to 10 Suppliers | Up to 40 Suppliers | Unlimited Suppliers |
+| **Stocky CSV Supplier & Lead-Time Recovery** | Up to 15 Suppliers | Up to 50 Suppliers | Unlimited Suppliers |
 | **Custom `po-pilot-mcp` Deployment (Claude + HTTP)** | Included | Included | Included |
 | **Live Read-Only Shopify Admin GraphQL Wiring** | 1 Shopify Store | Up to 2 Stores | Multi-Location / Plus |
-| **Automated Monday Slack/Email PO Workflow (n8n)** | — | Included | Included |
-| **AP 3-Way Match Invoice Guard + Debit Memo Bot** | — | — | Included (QuickBooks/Xero CSV ready) |
+| **US Tariff Landed Cost + Open-to-Buy + POS Transfer CSV** | Included | Included | Included |
+| **Automated Monday Slack/Email PO Workflow (`n8n #01`)** | — | Included | Included |
+| **Email PDF Invoice 3-Way Match + QuickBooks/Xero CSVs (`n8n #02 & #03`)** | — | — | Included (IMAP PDF + QBO/Xero) |
 | **Recorded Loom Handoff + Team SOP** | 15-min Loom | 30-min Live + Loom | 60-min Live + 14-Day Support |
 
 ---
@@ -40,10 +41,10 @@ I deploy a private, zero-subscription **Purchasing & Accounts Payable MCP + n8n 
    I ingest your historical Stocky Purchase Order CSVs and reconstruct every vendor's true observed lead time (mean + variance from order-to-receipt timestamps), SKU unit costs, carton pack multiples, and minimum order sizes.
 2. **Stockout-Adjusted Replenishment & MOQ Engine (`po-pilot-mcp`)**
    Connected directly to your Shopify Admin API (read-only scopes: `read_products`, `read_inventory`, `read_orders`). Calculates true daily velocity excluding stockout days, Z-score safety stock (90%–99% service levels), carton rounding, and automatic A-SKU top-ups when an order sits just below your supplier's wholesale minimum or free-freight threshold.
-3. **One-Click Shopify Draft PO CSVs + Automated Monday Slack Digest**
-   Every Monday at 8:00 AM, your purchasing channel receives ready-to-import Shopify Native Draft PO CSVs (`SKU,Supplier SKU,Quantity,Cost,Tax %`) and pre-addressed vendor PO emails.
-4. **Accounts Payable 3-Way Match Guard ($1,500 Tier)**
-   Before Finance pays a distributor invoice, the system cross-checks your original PO vs warehouse receiving counts vs the vendor's billed invoice — catching silent unit-price hikes, damaged/short-shipped cartons, and freight cap overages, and drafting the exact Debit Memo email.
+3. **One-Click Shopify Draft PO CSVs + POS Barcode Transfer CSVs + Monday Slack Digest**
+   Every Monday at 8:00 AM, your purchasing channel receives ready-to-import Shopify Native Draft PO CSVs (`SKU,Supplier SKU,Quantity,Cost,Tax %`), Shopify POS Inventory Transfer CSVs (`SKU,Barcode,Quantity` for retail scanner receiving), US import tariff + freight landed-cost checks, Open-to-Buy cashflow rationing, and pre-addressed vendor PO emails.
+4. **Automated Email PDF Invoice 3-Way Match + QuickBooks/Xero Bill CSVs ($2,500 Tier)**
+   When a supplier emails a PDF invoice to your AP inbox, n8n extracts the PDF lines and cross-checks your original PO vs warehouse receiving counts vs the billed invoice — catching silent unit-price hikes, damaged/short-shipped cartons, and freight cap overages, drafting the Vendor Debit Memo, and emitting verified-only **QuickBooks Online** and **Xero** Bill CSVs.
 
 ### Why Clients Pick This Over a $250/mo App
 - **Zero recurring SaaS bloat**: Runs on your own Claude Desktop, Cursor, or free/self-hosted n8n + Cloudflare/Railway worker.

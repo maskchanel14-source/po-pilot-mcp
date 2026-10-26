@@ -74,7 +74,7 @@ export function migrateStockyPoCsv(rawCsv: string): {
     });
 
     const poTotals = new Map<string, { units: number; usd: number; leadDays: number | null }>();
-    const skuStats = new Map<string, { title: string; latestCost: number; quantities: number[] }>();
+    const skuStats = new Map<string, { displaySku: string; title: string; latestCost: number; quantities: number[] }>();
 
     for (const { row: r, createdMs } of chronological) {
       const poNum = pickField(r, ["PO Number", "Purchase Order", "PO", "ID"]).trim() || "PO-UNKNOWN";
@@ -97,11 +97,13 @@ export function migrateStockyPoCsv(rawCsv: string): {
       poTotals.set(poNum, curPo);
 
       if (sku) {
-        const curSku = skuStats.get(sku) ?? { title, latestCost: cost, quantities: [] };
+        const skuKey = sku.toUpperCase();
+        const curSku = skuStats.get(skuKey) ?? { displaySku: sku, title, latestCost: cost, quantities: [] };
+        curSku.displaySku = sku;
         if (title) curSku.title = title;
         if (cost > 0) curSku.latestCost = cost;
         if (qty > 0) curSku.quantities.push(qty);
-        skuStats.set(sku, curSku);
+        skuStats.set(skuKey, curSku);
       }
     }
 
@@ -115,10 +117,10 @@ export function migrateStockyPoCsv(rawCsv: string): {
     const minUnits = poUnits.length > 0 ? Math.min(...poUnits) : 0;
     const minUsd = poUsd.length > 0 ? Math.floor(Math.min(...poUsd) / 50) * 50 : 0;
 
-    const skus = [...skuStats.entries()].map(([sku, st]) => {
+    const skus = [...skuStats.values()].map((st) => {
       const pack = st.quantities.length > 0 ? st.quantities.reduce((acc, q) => gcd(acc, q)) : 1;
       return {
-        sku,
+        sku: st.displaySku,
         title: st.title,
         latest_unit_cost_usd: Number(st.latestCost.toFixed(2)),
         inferred_case_pack: pack > 100 ? 1 : pack,

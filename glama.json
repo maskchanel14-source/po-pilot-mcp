@@ -2,7 +2,7 @@
   "$schema": "https://glama.ai/mcp/schemas/server.json",
   "maintainers": ["maskchanel14-source"],
   "name": "po-pilot-mcp",
-  "description": "Post-Stocky Shopify replenishment, vendor MOQ/carton Purchase Order generator, Stocky CSV supplier recovery, and Accounts Payable 3-way match MCP server.",
+  "description": "Post-Stocky Shopify replenishment, Open-to-Buy & landed-cost MOQ Purchase Orders, POS Transfer CSVs, Stocky CSV recovery, and 3-way invoice match with QuickBooks/Xero Bill CSVs.",
   "tools": {
     "calculate_replenishment_plan": {
       "enabled": true,
@@ -10,11 +10,11 @@
     },
     "build_supplier_purchase_orders": {
       "enabled": true,
-      "description": "Groups SKUs by vendor, enforces carton multiples + supplier MOQ/USD thresholds via smart A-SKU top-ups, and outputs Shopify Native Draft PO CSVs + supplier emails."
+      "description": "Groups SKUs by vendor, enforces carton multiples + MOQ/USD thresholds, computes US tariff + freight landed costs and Open-to-Buy rationing, and outputs Shopify PO + POS Transfer CSVs."
     },
     "reconcile_po_three_way_match": {
       "enabled": true,
-      "description": "Cross-checks PO vs warehouse receiving vs supplier invoice to catch silent price creep, short-shipments, and unapproved fees, outputting a Debit Memo."
+      "description": "Cross-checks PO vs warehouse receiving vs supplier invoice to catch price creep, short-shipments, and unapproved fees, outputting a Debit Memo + QuickBooks/Xero Bill CSVs."
     },
     "migrate_stocky_csv_snapshot": {
       "enabled": true,

@@ -2,15 +2,15 @@
 # Deploy: npm install -g mcpize && mcpize login && mcpize deploy --yes
 #
 # Recommended Subscription Tiers (set in MCPize Developer Dashboard -> Monetization):
-#   - Free Sandbox ($0/mo): 15 requests/month
-#   - Pro Store ($19/mo):   300 requests/month
-#   - Agency ($59/mo):      2,500 requests/month
+#   - Free Sandbox ($0/mo):   15 requests/month
+#   - Cloud Pro ($29/mo):     500 requests/month
+#   - Cloud Agency ($79/mo):  3,000 requests/month
 version: 1
 name: po-pilot-mcp
 description: >-
   Replaces Shopify Stocky's retired purchasing workflow: stockout-adjusted
-  velocity & Z-score safety stock, supplier MOQ/carton Purchase Orders + Shopify
-  Draft PO CSVs, Stocky CSV supplier recovery, and Accounts Payable 3-way match.
+  safety stock, Open-to-Buy & tariff landed-cost Purchase Orders + Shopify PO &
+  POS Transfer CSVs, Stocky CSV recovery, and 3-way match with QBO/Xero CSVs.
 
 runtime: typescript
 entry: dist/index.js
@@ -61,11 +61,11 @@ credentials_mode: per_user
 #       price: "0.03"
 #       description: "Compute stockout-adjusted safety stock, ABC classes, and reorder quantities."
 #     - name: build_supplier_purchase_orders
-#       price: "0.05"
-#       description: "Generate carton/MOQ-compliant supplier POs and Shopify Draft PO CSVs."
+#       price: "0.06"
+#       description: "Generate MOQ/OTB supplier POs, tariff landed costs, and Shopify PO + POS Transfer CSVs."
 #     - name: reconcile_po_three_way_match
-#       price: "0.08"
-#       description: "Audit PO vs receiving vs supplier invoice and generate a Debit Memo."
+#       price: "0.10"
+#       description: "Audit PO vs receiving vs supplier invoice and emit Debit Memo + QuickBooks/Xero Bill CSVs."
 #     - name: migrate_stocky_csv_snapshot
 #       price: "0.02"
 #       description: "Reconstruct supplier lead times, pack multiples, and costs from Stocky CSV."

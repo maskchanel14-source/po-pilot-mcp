@@ -90,8 +90,12 @@ export function parseCsv(rawCsv: string): Array<Record<string, string>> {
   });
 }
 
-function escapeCsvCell(value: string | number): string {
-  const str = String(value);
+export function escapeCsvCell(value: string | number): string {
+  let str = String(value);
+  // OWASP CWE-1236: neutralize spreadsheet formula/DDE injection on string cells
+  if (typeof value === "string" && (/^[=@\t\r]/.test(str) || /^[+-](?![0-9])/.test(str))) {
+    str = `'${str}`;
+  }
   if (/[",\r\n]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }
@@ -118,6 +122,29 @@ export function toShopifyDraftPoCsv(
       escapeCsvCell(line.quantity),
       escapeCsvCell(line.unit_cost_usd.toFixed(2)),
       escapeCsvCell((line.tax_percent ?? 0).toFixed(2))
+    ].join(",")
+  );
+  return [header.join(","), ...body].join("\n");
+}
+
+/**
+ * Formats line items into Shopify Admin Official Inventory Transfers CSV format
+ * (`SKU,Barcode,Quantity` matching Shopify CDN `add_products_template.csv`) for
+ * Shopify POS barcode scanner receiving and retail barcode label printing.
+ */
+export function toShopifyTransferImportCsv(
+  lines: Array<{
+    sku: string;
+    barcode?: string;
+    quantity: number;
+  }>
+): string {
+  const header = ["SKU", "Barcode", "Quantity"];
+  const body = lines.map((line) =>
+    [
+      escapeCsvCell(line.sku),
+      escapeCsvCell(line.barcode ?? ""),
+      escapeCsvCell(line.quantity)
     ].join(",")
   );
   return [header.join(","), ...body].join("\n");
@@ -155,6 +182,7 @@ export function mapInventoryCsvToSignals(rawCsv: string, defaultWindowDays = 30)
   for (const row of rows) {
     const sku = pickField(row, ["Variant SKU", "SKU", "sku"]).trim();
     if (!sku) continue;
+    const barcode = pickField(row, ["Variant Barcode", "Barcode", "UPC", "EAN", "GTIN", "barcode"]).trim() || undefined;
     const title = pickField(row, ["Title", "Product Title", "Name", "Product"]).trim() || sku;
     const vendor = pickField(row, ["Vendor", "Supplier", "Supplier Name"]).trim() || "Unassigned Vendor";
     const onHand = Math.max(
@@ -175,6 +203,7 @@ export function mapInventoryCsvToSignals(rawCsv: string, defaultWindowDays = 30)
 
     signals.push({
       sku,
+      ...(barcode ? { barcode } : {}),
       title,
       vendor,
       on_hand: onHand,

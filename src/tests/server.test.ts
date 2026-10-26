@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { mapInventoryCsvToSignals } from "../csvUtils.js";
+import { mapInventoryCsvToSignals, parseCsv } from "../csvUtils.js";
 import { DEMO_SKU_SIGNALS, DEMO_STOCKY_PO_CSV, DEMO_SUPPLIER_RULES, DEMO_THREE_WAY_MATCH } from "../demoData.js";
 import {
   clearEntitlementCache,
@@ -143,6 +143,168 @@ describe("PO Pilot Domain Engines", () => {
     assert.ok(heroLine && stickerLine);
     assert.ok(heroLine.order_qty > 2000);
     assert.ok(stickerLine.order_qty < 500);
+    assert.ok(bigPo.shopify_transfer_import_csv.startsWith("SKU,Barcode,Quantity\n"));
+  });
+
+  it("computes US import tariff landed costs, margin-erosion alerts, Shopify POS Transfer CSVs, and Open-to-Buy (OTB) cashflow rationing", () => {
+    const plan = computeReplenishmentPlan([
+      {
+        sku: "HERO-MUG-A",
+        barcode: "850012345001",
+        title: "Insulated Mug 16oz",
+        vendor: "Shenzhen Drinkware",
+        on_hand: 5,
+        committed: 10, // net -5 CRITICAL deficit!
+        on_order: 0,
+        backorders: 0,
+        units_sold_window: 300, // 10/day, high margin -> A-class CRITICAL
+        window_days: 30,
+        stockout_days: 0,
+        unit_cost_usd: 5.0,
+        retail_price_usd: 30.0,
+        lead_time_days: 20,
+        lead_time_std_dev_days: 2,
+        case_pack: 20,
+        sku_moq: 20
+      },
+      {
+        sku: "LOW-MARGIN-LID-C",
+        barcode: "850012345002",
+        title: "Replacement Plastic Lid",
+        vendor: "Shenzhen Drinkware",
+        on_hand: 35,
+        committed: 0,
+        on_order: 0,
+        backorders: 0,
+        units_sold_window: 60, // 2/day, low margin -> C-class REORDER_NOW
+        window_days: 30,
+        stockout_days: 0,
+        unit_cost_usd: 4.0,
+        retail_price_usd: 6.0, // 25% tariff + freight pushes landed cost >= $5.00 (<40% margin!)
+        lead_time_days: 20,
+        lead_time_std_dev_days: 2,
+        case_pack: 10,
+        sku_moq: 10
+      }
+    ]);
+
+    const uncapped = generateSupplierPurchaseOrders(
+      plan.items,
+      [
+        {
+          vendor: "Shenzhen Drinkware",
+          payment_terms: "Net 30",
+          currency: "USD",
+          min_order_units: 0,
+          min_order_value_usd: 0,
+          ship_to_location: "LA 3PL",
+          import_duty_pct: 25,
+          estimated_freight_usd: 150
+        }
+      ],
+      "PO-IMPORT"
+    );
+    const uncappedPo = uncapped.purchase_orders[0];
+    assert.ok(uncappedPo.estimated_duty_usd > 0);
+    assert.equal(uncappedPo.estimated_freight_usd, 150);
+    assert.equal(
+      uncappedPo.total_landed_cost_usd,
+      Number((uncappedPo.subtotal_usd + uncappedPo.estimated_duty_usd + 150).toFixed(2))
+    );
+    assert.ok(uncappedPo.shopify_transfer_import_csv.includes("HERO-MUG-A,850012345001,"));
+    const lidLine = uncappedPo.lines.find((l) => l.sku === "LOW-MARGIN-LID-C");
+    assert.ok(lidLine);
+    assert.equal(lidLine.margin_erosion_warning, true);
+
+    // Apply Open-to-Buy (OTB) cash ceiling tighter than uncapped total_landed_po_spend_usd
+    const budgetCap = 2200;
+    assert.ok(uncapped.total_landed_po_spend_usd > budgetCap);
+
+    const rationed = generateSupplierPurchaseOrders(
+      plan.items,
+      [
+        {
+          vendor: "Shenzhen Drinkware",
+          payment_terms: "Net 30",
+          currency: "USD",
+          min_order_units: 0,
+          min_order_value_usd: 0,
+          ship_to_location: "LA 3PL",
+          import_duty_pct: 25,
+          estimated_freight_usd: 150
+        }
+      ],
+      "PO-OTB",
+      { maxCashBudgetUsd: budgetCap, minGrossMarginPct: 40 }
+    );
+    assert.ok(rationed.otb_summary);
+    assert.equal(rationed.otb_summary.budget_respected, true);
+    assert.ok(rationed.total_landed_po_spend_usd <= budgetCap);
+    assert.ok(rationed.otb_summary.cartons_trimmed > 0);
+    // CRITICAL A-class HERO-MUG-A must remain protected with positive cartons while C-class lid is trimmed first!
+    const rationedPo = rationed.purchase_orders[0];
+    const rationedHero = rationedPo.lines.find((l) => l.sku === "HERO-MUG-A");
+    assert.ok(rationedHero && rationedHero.order_qty >= 200);
+    assert.ok(rationedPo.shopify_draft_po_csv.includes(`HERO-MUG-A,HERO-MUG-A,${rationedHero.order_qty},`));
+    assert.ok(rationedPo.shopify_transfer_import_csv.includes(`HERO-MUG-A,850012345001,${rationedHero.order_qty}`));
+
+    // Edge case: multiple $0.00 promo SKUs with $200 fixed vendor freight under a $100 OTB cap must drop freight-bearing $0 PO
+    const zeroCostPlan = computeReplenishmentPlan([
+      {
+        sku: "PROMO-STICKER-1",
+        title: "Free Sticker 1",
+        vendor: "Promo Vendor",
+        on_hand: 0,
+        committed: 0,
+        on_order: 0,
+        backorders: 0,
+        units_sold_window: 60,
+        window_days: 30,
+        stockout_days: 0,
+        unit_cost_usd: 0,
+        retail_price_usd: 0,
+        lead_time_days: 10,
+        lead_time_std_dev_days: 1,
+        case_pack: 10,
+        sku_moq: 10
+      },
+      {
+        sku: "PROMO-STICKER-2",
+        title: "Free Sticker 2",
+        vendor: "Promo Vendor",
+        on_hand: 0,
+        committed: 0,
+        on_order: 0,
+        backorders: 0,
+        units_sold_window: 60,
+        window_days: 30,
+        stockout_days: 0,
+        unit_cost_usd: 0,
+        retail_price_usd: 0,
+        lead_time_days: 10,
+        lead_time_std_dev_days: 1,
+        case_pack: 10,
+        sku_moq: 10
+      }
+    ]);
+    const zeroCostOtb = generateSupplierPurchaseOrders(
+      zeroCostPlan.items,
+      [
+        {
+          vendor: "Promo Vendor",
+          payment_terms: "Net 30",
+          currency: "USD",
+          min_order_units: 0,
+          min_order_value_usd: 0,
+          estimated_freight_usd: 200,
+          ship_to_location: "US Hub"
+        }
+      ],
+      "PO-ZERO",
+      { maxCashBudgetUsd: 100 }
+    );
+    assert.equal(zeroCostOtb.total_landed_po_spend_usd, 0);
+    assert.equal(zeroCostOtb.otb_summary?.budget_respected, true);
   });
 
   it("catches price creep, unshipped missing receiving SKUs, split-pallet receiving, and freight overages in 3-way match", () => {
@@ -185,6 +347,51 @@ describe("PO Pilot Domain Engines", () => {
     });
     assert.equal(caseAudit.payment_recommendation, "APPROVE_IN_FULL");
     assert.equal(caseAudit.discrepancies.length, 0);
+
+    // Verify QuickBooks Online & Xero Bill CSV exports contain ONLY verified payable amounts ($2,386.20 on DEMO)
+    assert.ok(
+      audit.quickbooks_bill_csv.startsWith(
+        "BillNo,Supplier,BillDate,DueDate,LineDescription,LineAmount,Account,LineTaxCode,Currency\n"
+      )
+    );
+    assert.ok(!audit.quickbooks_bill_csv.includes("PALLET-WRAP-SURCHARGE"));
+    const qboRows = audit.quickbooks_bill_csv.trim().split("\n").slice(1);
+    const qboSum = Number(
+      qboRows.reduce((acc: number, r: string) => acc + Number(r.split(",")[5]), 0).toFixed(2)
+    );
+    assert.equal(qboSum, audit.verified_payable_amount_usd);
+
+    assert.ok(
+      audit.xero_bill_csv.startsWith(
+        "*ContactName,*InvoiceNumber,*InvoiceDate,*DueDate,InventoryItemCode,Description,*Quantity,*UnitAmount,*AccountCode,*TaxType,Currency\n"
+      )
+    );
+    assert.ok(!audit.xero_bill_csv.includes("PALLET-WRAP-SURCHARGE"));
+    const xeroRows = audit.xero_bill_csv.trim().split("\n").slice(1);
+    const xeroSum = Number(
+      xeroRows
+        .reduce((acc: number, r: string) => {
+          const cols = r.split(",");
+          return acc + Number(cols[6]) * Number(cols[7]);
+        }, 0)
+        .toFixed(2)
+    );
+    assert.equal(xeroSum, audit.verified_payable_amount_usd);
+
+    // Adversarial CSV check: commas/quotes in vendor/title + OWASP CWE-1236 formula injection neutralization
+    const injectionAudit = runThreeWayMatch({
+      po_number: "PO-SEC-1",
+      vendor: '=CMD|\'/C calc\'!A0, "Inc."',
+      invoice_number: "@INV-77",
+      po_lines: [{ sku: "SKU-1", title: 'Mug, "Pro" Edition', ordered_qty: 10, unit_cost_usd: 5.0 }],
+      receiving_lines: [{ sku: "SKU-1", received_good_qty: 10, damaged_qty: 0 }],
+      invoice_lines: [{ sku: "SKU-1", billed_qty: 10, billed_unit_cost_usd: 5.0 }]
+    });
+    const parsedQbo = parseCsv(injectionAudit.quickbooks_bill_csv);
+    assert.equal(parsedQbo.length, 1);
+    assert.ok(parsedQbo[0].BillNo.startsWith("'@INV-77"));
+    assert.ok(parsedQbo[0].Supplier.startsWith("'=CMD"));
+    assert.equal(Number(parsedQbo[0].LineAmount), 50);
   });
 
   it("reconstructs supplier lead times, lowercase headers, and newest-first chronological cost from Stocky CSV", () => {
@@ -195,15 +402,17 @@ describe("PO Pilot Domain Engines", () => {
     assert.ok(pacific);
     assert.equal(pacific.observed_avg_lead_time_days, 22);
 
-    // Newest-first (descending) export with lowercase headers must keep 2026 cost ($9.75), NOT overwrite with 2024 cost ($7.10)!
+    // Newest-first (descending) export with lowercase headers & mixed SKU/vendor casing must merge into 1 SKU & keep 2026 cost ($9.75)!
     const descendingCsv = [
       "po_number,supplier,sku,product_title,quantity_ordered,cost_price,created_at,received_at",
       "PO-2026,Summit Gear,SG-BOTTLE,Bottle,48,$9.75,2026-08-01,2026-08-15",
-      "PO-2024,Summit Gear,SG-BOTTLE,Bottle,24,$7.10,2024-03-01,2024-03-19"
+      "PO-2024,summit gear ,sg-bottle,Bottle,24,$7.10,2024-03-01,2024-03-19"
     ].join("\n");
     const descResult = migrateStockyPoCsv(descendingCsv);
     assert.equal(descResult.suppliers_recovered, 1);
+    assert.equal(descResult.skus_recovered, 1);
     assert.equal(descResult.profiles[0].skus[0].latest_unit_cost_usd, 9.75);
+    assert.equal(descResult.profiles[0].skus[0].inferred_case_pack, 24);
   });
 
   it("paginates Shopify Admin GraphQL across multiple cursor pages for variants and orders", async () => {
@@ -382,7 +591,7 @@ describe("End-to-End MCP Stdio & Streamable HTTP + n8n Workflow Contracts", () =
     }
   });
 
-  it("returns application/json on POST /mcp and executes both $49 n8n workflow JSON templates end-to-end", async () => {
+  it("returns application/json on POST /mcp and executes all 3 n8n workflow JSON templates (#01, #02, #03) end-to-end", async () => {
     const { spawn } = await import("node:child_process");
     const port = 18942;
     const proc = spawn("node", ["dist/index.js", "--http"], {
@@ -411,6 +620,8 @@ describe("End-to-End MCP Stdio & Streamable HTTP + n8n Workflow Contracts", () =
       const cardRes = await fetch(`http://127.0.0.1:${port}/.well-known/mcp/server-card.json`);
       assert.equal(cardRes.status, 200);
       const cardJson = (await cardRes.json()) as { authentication: { optional_env: string[] } };
+      const diskCardJson = JSON.parse(readFileSync(".well-known/mcp/server-card.json", "utf8"));
+      assert.deepEqual(cardJson, diskCardJson);
       assert.ok(cardJson.authentication.optional_env.includes("PO_PILOT_LICENSE_KEY"));
 
       // Call POST /mcp directly as n8n httpRequest does -> MUST return application/json!
@@ -495,6 +706,88 @@ describe("End-to-End MCP Stdio & Streamable HTTP + n8n Workflow Contracts", () =
       }
       const whNode = wf02.nodes.find((n) => n.type === "n8n-nodes-base.webhook");
       assert.ok(whNode?.webhookId);
+
+      // Execute actual jsCode & validate schema of n8n template #03 (Email PDF Invoice -> Auto 3-Way Match + QBO/Xero CSVs)!
+      const wf03 = JSON.parse(
+        readFileSync("sales-bundle/n8n-templates/03-email-pdf-invoice-auto-3way-match.json", "utf8")
+      ) as {
+        nodes: Array<{ name: string; type: string; typeVersion?: number; parameters: Record<string, unknown> }>;
+      };
+      const imapNode = wf03.nodes.find((n) => n.type === "n8n-nodes-base.emailReadImap");
+      assert.ok(imapNode && imapNode.typeVersion === 2.1);
+      const pdfNode = wf03.nodes.find((n) => n.type === "n8n-nodes-base.extractFromFile");
+      assert.ok(pdfNode && pdfNode.parameters.operation === "pdf");
+
+      const parsePdfCode = wf03.nodes.find((n) => n.name === "Parse PDF Invoice Text")?.parameters.jsCode as string | undefined;
+      assert.ok(parsePdfCode);
+      const runParsePdf = new Function("$input", parsePdfCode) as (inp: {
+        first: () => { json: Record<string, unknown> };
+      }) => Array<{ json: Record<string, unknown> }>;
+
+      const samplePdfText = [
+        "COMMERCIAL INVOICE",
+        "Date: 2026-10-26",
+        "Invoice Number: INV-9921",
+        "Purchase Order #: PO-2026-1042",
+        "Vendor: Pacific Stainless Works",
+        "Freight & Handling: $240.00",
+        "HO-MUG-12OZ-BLK   Double-Wall Camp Mug 12oz   240   $6.85   $1,644.00",
+        "HO-FLASK-32OZ-RAW  96  $9.25",
+        "PALLET-WRAP-SURCHARGE  Pallet Shrink Wrap Fee  1  $65.00  $65.00"
+      ].join("\n");
+      const parsedPdfPayload = runParsePdf({
+        first: () => ({
+          json: {
+            text: samplePdfText,
+            po_lines: DEMO_THREE_WAY_MATCH.po_lines,
+            receiving_lines: DEMO_THREE_WAY_MATCH.receiving_lines,
+            agreed_freight_cap_usd: DEMO_THREE_WAY_MATCH.agreed_freight_cap_usd
+          }
+        })
+      })[0].json;
+      assert.equal(parsedPdfPayload.invoice_number, "INV-9921");
+      assert.equal(parsedPdfPayload.po_number, "PO-2026-1042");
+
+      // Unparseable scanned image PDF without demo_mode must throw explicitly rather than faking a demo match!
+      assert.throws(() =>
+        runParsePdf({
+          first: () => ({ json: { text: "   " } })
+        })
+      );
+
+      const mcpPdfMatchRes = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 4,
+          method: "tools/call",
+          params: { name: "reconcile_po_three_way_match", arguments: parsedPdfPayload }
+        })
+      });
+      const rawPdfMatchJson = await mcpPdfMatchRes.json();
+
+      const unpack03Code = wf03.nodes.find((n) => n.name === "Unpack Audit & QBO/Xero CSVs")?.parameters.jsCode as string | undefined;
+      assert.ok(unpack03Code);
+      const runUnpack03 = new Function("$input", unpack03Code) as (inp: {
+        first: () => { json: unknown };
+      }) => Array<{ json: Record<string, unknown> }>;
+      const out03 = runUnpack03({ first: () => ({ json: rawPdfMatchJson }) })[0].json;
+      assert.equal(out03.payment_recommendation, "HOLD_AND_ISSUE_DEBIT_MEMO");
+      assert.equal(out03.verified_payable_amount_usd, 2386.2);
+      assert.equal(out03.total_overcharge_recovered_usd, 450.8);
+      assert.ok(String(out03.quickbooks_bill_csv).startsWith("BillNo,Supplier,"));
+      assert.ok(String(out03.xero_bill_csv).startsWith("*ContactName,*InvoiceNumber,"));
+
+      const if03 = wf03.nodes.find((n) => n.type === "n8n-nodes-base.if");
+      assert.ok(if03);
+      assert.equal((if03.parameters.conditions as { combinator?: string }).combinator, "and");
+      const slackNodes03 = wf03.nodes.filter((n) => n.type === "n8n-nodes-base.slack");
+      assert.equal(slackNodes03.length, 2);
+      for (const sn of slackNodes03) {
+        assert.equal(sn.parameters.select, "channel");
+        assert.equal((sn.parameters.channelId as { __rl?: boolean }).__rl, true);
+      }
     } finally {
       proc.kill("SIGTERM");
     }

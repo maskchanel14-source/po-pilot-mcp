@@ -16,6 +16,7 @@ query PoPilotVariantsPage($cursor: String) {
     }
     nodes {
       sku
+      barcode
       title
       price
       inventoryQuantity
@@ -168,6 +169,7 @@ export async function fetchLiveShopifySignals(
         pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
         nodes?: Array<{
           sku: string | null;
+          barcode?: string | null;
           title: string;
           price: string;
           inventoryQuantity: number | null;
@@ -191,11 +193,16 @@ export async function fetchLiveShopifySignals(
       const existing = signalsBySku.get(skuKey);
       if (existing) {
         existing.on_hand += v.inventoryQuantity ?? 0;
+        if (!existing.barcode && v.barcode?.trim()) {
+          existing.barcode = v.barcode.trim();
+        }
         continue;
       }
 
+      const cleanBarcode = v.barcode?.trim();
       signalsBySku.set(skuKey, {
         sku,
+        ...(cleanBarcode ? { barcode: cleanBarcode } : {}),
         title: `${v.product.title}${variantSuffix}`,
         vendor: v.product.vendor || "Unassigned Vendor",
         on_hand: v.inventoryQuantity ?? 0,

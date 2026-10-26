@@ -24,11 +24,18 @@ export function deduplicateSignals(rawSignals: SkuSignal[]): SkuSignal[] {
     if (!key) continue;
     const existing = merged.get(key);
     if (!existing) {
-      merged.set(key, { ...s, sku: s.sku.trim(), vendor: s.vendor.trim() || "Unassigned Vendor" });
+      merged.set(key, {
+        ...s,
+        sku: s.sku.trim(),
+        ...(s.barcode?.trim() ? { barcode: s.barcode.trim() } : {}),
+        vendor: s.vendor.trim() || "Unassigned Vendor"
+      });
     } else {
       const windowDays = Math.max(existing.window_days, s.window_days);
+      const barcode = existing.barcode?.trim() || s.barcode?.trim();
       merged.set(key, {
         ...existing,
+        ...(barcode ? { barcode } : {}),
         title: existing.title || s.title,
         vendor: existing.vendor !== "Unassigned Vendor" ? existing.vendor : s.vendor.trim() || existing.vendor,
         on_hand: existing.on_hand + s.on_hand,
@@ -114,6 +121,7 @@ export function computeReplenishmentPlan(
 
     return {
       sku: s.sku,
+      ...(s.barcode ? { barcode: s.barcode } : {}),
       title: s.title,
       vendor: s.vendor,
       abc_class: abcMap.get(s.sku) ?? "C",
@@ -130,6 +138,7 @@ export function computeReplenishmentPlan(
       case_pack: s.case_pack,
       sku_moq: s.sku_moq,
       unit_cost_usd: s.unit_cost_usd,
+      retail_price_usd: s.retail_price_usd,
       lead_time_days: s.lead_time_days
     };
   });
