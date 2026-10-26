@@ -8,6 +8,12 @@ import {
   DEMO_SUPPLIER_RULES,
   DEMO_THREE_WAY_MATCH
 } from "./demoData.js";
+import {
+  FREE_LOCAL_MAX_INVOICE_LINES,
+  FREE_LOCAL_MAX_SKUS,
+  resolveEntitlement,
+  UPGRADE_NOTICE
+} from "./entitlements.js";
 import { generateSupplierPurchaseOrders } from "./engines/purchaseOrder.js";
 import { computeReplenishmentPlan } from "./engines/replenishment.js";
 import { migrateStockyPoCsv } from "./engines/stockyMigration.js";
@@ -39,7 +45,7 @@ function formatError(toolName: string, err: unknown) {
             tool: toolName,
             error: message,
             remediation:
-              "Pass `demo_mode: true` to test with sample US merchant data, paste `inventory_csv` / structured `skus`, or set valid SHOPIFY_STORE_DOMAIN and SHOPIFY_ACCESS_TOKEN environment variables."
+              "Pass `demo_mode: true` to test with sample US merchant data, paste `inventory_csv` / structured `skus` (up to 25 SKUs free locally), or set PO_PILOT_LICENSE_KEY + SHOPIFY_STORE_DOMAIN + SHOPIFY_ACCESS_TOKEN for Unlimited Live Shopify sync."
           },
           null,
           2
@@ -49,44 +55,111 @@ function formatError(toolName: string, err: unknown) {
   };
 }
 
-async function resolveSkuInputs(params: {
-  skus?: SkuSignal[];
-  inventory_csv?: string;
-  use_live_shopify?: boolean;
-  demo_mode?: boolean;
-  window_days?: number;
-}): Promise<{ source: string; signals: SkuSignal[] }> {
+function formatUpgradeRequired(toolName: string, feature: string) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify(
+          {
+            ok: false,
+            tool: toolName,
+            upgrade_required: true,
+            feature,
+            message: UPGRADE_NOTICE,
+            how_to_test_free_now:
+              "Pass `demo_mode: true` or paste up to 25 SKUs via `inventory_csv` / `skus` to run PO math immediately at $0.",
+            upgrade_options: {
+              self_hosted_lifetime_kit_usd: 49,
+              cloud_pro_monthly_usd: 19,
+              cloud_agency_monthly_usd: 59,
+              env_var: "PO_PILOT_LICENSE_KEY"
+            }
+          },
+          null,
+          2
+        )
+      }
+    ]
+  };
+}
+
+class LiveShopifyEntitlementError extends Error {
+  constructor() {
+    super("LIVE_SHOPIFY_REQUIRES_PRO_ENTITLEMENT");
+  }
+}
+
+async function resolveSkuInputs(
+  params: {
+    skus?: SkuSignal[];
+    inventory_csv?: string;
+    use_live_shopify?: boolean;
+    demo_mode?: boolean;
+    window_days?: number;
+  },
+  unlocked: boolean
+): Promise<{
+  source: string;
+  signals: SkuSignal[];
+  truncationMeta: Record<string, unknown>;
+}> {
+  let source = "";
+  let rawSignals: SkuSignal[] = [];
+
   if (params.demo_mode) {
-    return { source: `demo_fixture (${DEMO_STORE_NAME})`, signals: DEMO_SKU_SIGNALS };
-  }
-  if (params.skus && params.skus.length > 0) {
-    return { source: "structured_json_input", signals: params.skus };
-  }
-  if (params.inventory_csv && params.inventory_csv.trim().length > 0) {
+    source = `demo_fixture (${DEMO_STORE_NAME})`;
+    rawSignals = DEMO_SKU_SIGNALS;
+  } else if (params.skus && params.skus.length > 0) {
+    source = "structured_json_input";
+    rawSignals = params.skus;
+  } else if (params.inventory_csv && params.inventory_csv.trim().length > 0) {
     const parsed = mapInventoryCsvToSignals(params.inventory_csv, params.window_days ?? 30);
     if (parsed.length === 0) {
       throw new Error("Parsed 0 SKUs from `inventory_csv`. Ensure header includes `SKU` (or `Variant SKU`) and quantity columns.");
     }
-    return { source: "csv_input", signals: parsed };
-  }
-  if (params.use_live_shopify) {
+    source = "csv_input";
+    rawSignals = parsed;
+  } else if (params.use_live_shopify) {
+    if (!unlocked) {
+      throw new LiveShopifyEntitlementError();
+    }
     const cfg = resolveShopifyConfig();
     if (!cfg) {
       throw new Error("Live Shopify mode requested, but SHOPIFY_STORE_DOMAIN or SHOPIFY_ACCESS_TOKEN is not set.");
     }
-    const live = await fetchLiveShopifySignals(cfg, params.window_days ?? 30);
-    return { source: `shopify_admin_graphql (${cfg.storeDomain})`, signals: live };
+    rawSignals = await fetchLiveShopifySignals(cfg, params.window_days ?? 30);
+    source = `shopify_admin_graphql (${cfg.storeDomain})`;
+  } else {
+    const autoCfg = resolveShopifyConfig();
+    if (autoCfg) {
+      if (!unlocked) {
+        throw new LiveShopifyEntitlementError();
+      }
+      rawSignals = await fetchLiveShopifySignals(autoCfg, params.window_days ?? 30);
+      source = `shopify_admin_graphql (${autoCfg.storeDomain})`;
+    } else {
+      throw new Error(
+        "No SKU data supplied. Provide `skus` array, paste `inventory_csv`, configure PO_PILOT_LICENSE_KEY + SHOPIFY_STORE_DOMAIN + SHOPIFY_ACCESS_TOKEN, or set `demo_mode: true`."
+      );
+    }
   }
 
-  const autoCfg = resolveShopifyConfig();
-  if (autoCfg) {
-    const live = await fetchLiveShopifySignals(autoCfg, params.window_days ?? 30);
-    return { source: `shopify_admin_graphql (${autoCfg.storeDomain})`, signals: live };
+  if (!unlocked && rawSignals.length > FREE_LOCAL_MAX_SKUS) {
+    return {
+      source,
+      signals: rawSignals.slice(0, FREE_LOCAL_MAX_SKUS),
+      truncationMeta: {
+        truncated_by_free_tier: true,
+        skus_received: rawSignals.length,
+        skus_processed: FREE_LOCAL_MAX_SKUS,
+        skus_omitted: rawSignals.length - FREE_LOCAL_MAX_SKUS,
+        upgrade_notice: UPGRADE_NOTICE
+      }
+    };
   }
 
-  throw new Error(
-    "No SKU data supplied. Provide `skus` array, paste `inventory_csv`, configure SHOPIFY_STORE_DOMAIN + SHOPIFY_ACCESS_TOKEN, or set `demo_mode: true`."
-  );
+  return { source, signals: rawSignals, truncationMeta: {} };
 }
 
 export function createPoPilotServer(): McpServer {
@@ -101,11 +174,11 @@ export function createPoPilotServer(): McpServer {
     {
       title: "Calculate Stockout-Adjusted Replenishment & Reorder Points",
       description:
-        "Replaces Shopify Stocky's retired forecasting brain. Computes margin-weighted ABC classes, stockout-adjusted daily sales velocity, demand + lead-time variability safety stock (SS = Z * sqrt(LT*sigma_d^2 + d^2*sigma_LT^2)), reorder points, inventory position (On-Hand + On-Order - Committed - Backorders), days of cover, and carton-rounded order recommendations. Accepts structured `skus`, pasted Shopify `inventory_csv`, live Shopify Admin GraphQL (`use_live_shopify: true`), or zero-key `demo_mode: true`.",
+        "Replaces Shopify Stocky's retired forecasting brain. Computes margin-weighted ABC classes, stockout-adjusted daily sales velocity, demand + lead-time variability safety stock (SS = Z * sqrt(LT*sigma_d^2 + d^2*sigma_LT^2)), reorder points, inventory position (On-Hand + On-Order - Committed - Backorders), days of cover, and carton-rounded order recommendations. Free Local Sandbox processes up to 25 SKUs per call; Pro/License unlocks unlimited SKUs and Live Shopify sync.",
       inputSchema: {
         skus: z.array(SkuSignalSchema).max(2500).optional().describe("Structured SKU inventory + velocity rows."),
         inventory_csv: z.string().max(2_000_000).optional().describe("Raw CSV exported from Shopify Admin Products or merchant reorder spreadsheet."),
-        use_live_shopify: z.boolean().default(false).describe("Pull live variants and paid order velocity from configured Shopify Admin GraphQL API."),
+        use_live_shopify: z.boolean().default(false).describe("Pull live variants and paid order velocity from configured Shopify Admin GraphQL API (Pro / License)."),
         demo_mode: z.boolean().default(false).describe("Run immediately against the built-in US Shopify merchant dataset (no API keys required)."),
         service_level: ServiceLevelSchema,
         review_period_days: z.number().int().min(1).max(180).default(14).describe("Days between purchasing review cycles (e.g., 7 for weekly, 14 for bi-weekly)."),
@@ -120,7 +193,8 @@ export function createPoPilotServer(): McpServer {
     },
     async (args) => {
       try {
-        const { source, signals } = await resolveSkuInputs(args);
+        const entitlement = await resolveEntitlement();
+        const { source, signals, truncationMeta } = await resolveSkuInputs(args, entitlement.unlocked);
         const summary = computeReplenishmentPlan(signals, {
           serviceLevel: args.service_level,
           reviewPeriodDays: args.review_period_days
@@ -129,11 +203,24 @@ export function createPoPilotServer(): McpServer {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ ok: true, data_source: source, ...summary }, null, 2)
+              text: JSON.stringify(
+                {
+                  ok: true,
+                  entitlement_tier: entitlement.tier,
+                  data_source: source,
+                  ...truncationMeta,
+                  ...summary
+                },
+                null,
+                2
+              )
             }
           ]
         };
       } catch (err) {
+        if (err instanceof LiveShopifyEntitlementError) {
+          return formatUpgradeRequired("calculate_replenishment_plan", "live_shopify_admin_graphql");
+        }
         return formatError("calculate_replenishment_plan", err);
       }
     }
@@ -150,7 +237,7 @@ export function createPoPilotServer(): McpServer {
         skus: z.array(SkuSignalSchema).max(2500).optional().describe("Structured SKU inventory + velocity rows."),
         inventory_csv: z.string().max(2_000_000).optional().describe("Raw Shopify Products/Inventory CSV text."),
         supplier_rules: z.array(SupplierRuleSchema).max(500).optional().describe("Per-vendor MOQ, minimum USD spend, payment terms, email, and ship-to location rules."),
-        use_live_shopify: z.boolean().default(false).describe("Pull live store SKUs from Shopify Admin GraphQL."),
+        use_live_shopify: z.boolean().default(false).describe("Pull live store SKUs from Shopify Admin GraphQL (Pro / License)."),
         demo_mode: z.boolean().default(false).describe("Generate full multi-vendor POs using the built-in Austin, TX merchant demo dataset."),
         service_level: ServiceLevelSchema,
         review_period_days: z.number().int().min(1).max(180).default(14).describe("Days of forward cover to buy beyond lead time."),
@@ -165,14 +252,16 @@ export function createPoPilotServer(): McpServer {
     },
     async (args) => {
       try {
-        const { source, signals } = await resolveSkuInputs(args);
+        const entitlement = await resolveEntitlement();
+        const { source, signals, truncationMeta } = await resolveSkuInputs(args, entitlement.unlocked);
         const plan = computeReplenishmentPlan(signals, {
           serviceLevel: args.service_level,
           reviewPeriodDays: args.review_period_days
         });
-        const rules = args.demo_mode && (!args.supplier_rules || args.supplier_rules.length === 0)
-          ? DEMO_SUPPLIER_RULES
-          : args.supplier_rules ?? [];
+        const rules =
+          args.demo_mode && (!args.supplier_rules || args.supplier_rules.length === 0)
+            ? DEMO_SUPPLIER_RULES
+            : args.supplier_rules ?? [];
         const poBundle = generateSupplierPurchaseOrders(plan.items, rules, args.po_prefix);
 
         return {
@@ -182,7 +271,9 @@ export function createPoPilotServer(): McpServer {
               text: JSON.stringify(
                 {
                   ok: true,
+                  entitlement_tier: entitlement.tier,
                   data_source: source,
+                  ...truncationMeta,
                   purchase_orders_count: poBundle.purchase_orders.length,
                   total_po_spend_usd: poBundle.total_po_spend_usd,
                   purchase_orders: poBundle.purchase_orders
@@ -194,6 +285,9 @@ export function createPoPilotServer(): McpServer {
           ]
         };
       } catch (err) {
+        if (err instanceof LiveShopifyEntitlementError) {
+          return formatUpgradeRequired("build_supplier_purchase_orders", "live_shopify_admin_graphql");
+        }
         return formatError("build_supplier_purchase_orders", err);
       }
     }
@@ -205,7 +299,7 @@ export function createPoPilotServer(): McpServer {
     {
       title: "Audit PO vs Warehouse Receiving vs Supplier Invoice (3-Way Match)",
       description:
-        "Deterministic Finance Ops 3-way match engine for wholesalers and Shopify merchants. Cross-examines approved Purchase Order lines, warehouse dock receiving counts (good vs damaged units), and billed supplier invoice lines to catch silent unit-price creep, short-shipments billed in full, unapproved surcharges, and freight cap overages. Calculates exact verified payable USD and drafts a ready-to-send Vendor Debit Memo / Dispute Email.",
+        "Deterministic Finance Ops 3-way match engine for wholesalers and Shopify merchants. Cross-examines approved Purchase Order lines, warehouse dock receiving counts (good vs damaged units), and billed supplier invoice lines to catch silent unit-price creep, short-shipments billed in full, unapproved surcharges, and freight cap overages. Free Local Sandbox audits up to 15 invoice lines per call; Pro/License unlocks unlimited invoice audits.",
       inputSchema: {
         po_number: z.string().max(80).default("PO-2026-1042").describe("Purchase Order reference number."),
         vendor: z.string().max(160).default("Supplier").describe("Vendor or distributor name."),
@@ -225,7 +319,8 @@ export function createPoPilotServer(): McpServer {
     },
     async (args) => {
       try {
-        const payload = args.demo_mode
+        const entitlement = await resolveEntitlement();
+        const basePayload = args.demo_mode
           ? DEMO_THREE_WAY_MATCH
           : {
               po_number: args.po_number,
@@ -237,13 +332,48 @@ export function createPoPilotServer(): McpServer {
               agreed_freight_cap_usd: args.agreed_freight_cap_usd
             };
 
-        if (!args.demo_mode && (payload.po_lines.length === 0 || payload.invoice_lines.length === 0)) {
+        if (!args.demo_mode && (basePayload.po_lines.length === 0 || basePayload.invoice_lines.length === 0)) {
           throw new Error("Provide non-empty `po_lines` and `invoice_lines`, or pass `demo_mode: true` to inspect a sample audit.");
         }
 
-        const result = runThreeWayMatch(payload);
+        let truncationMeta: Record<string, unknown> = {};
+        let effectivePayload = basePayload;
+
+        if (!args.demo_mode && !entitlement.unlocked && basePayload.invoice_lines.length > FREE_LOCAL_MAX_INVOICE_LINES) {
+          const cappedInvoiceLines = basePayload.invoice_lines.slice(0, FREE_LOCAL_MAX_INVOICE_LINES);
+          const allowedSkus = new Set(cappedInvoiceLines.map((l) => l.sku));
+          effectivePayload = {
+            ...basePayload,
+            invoice_lines: cappedInvoiceLines,
+            po_lines: basePayload.po_lines.filter((l) => allowedSkus.has(l.sku)),
+            receiving_lines: basePayload.receiving_lines.filter((l) => allowedSkus.has(l.sku))
+          };
+          truncationMeta = {
+            truncated_by_free_tier: true,
+            invoice_lines_received: basePayload.invoice_lines.length,
+            invoice_lines_processed: FREE_LOCAL_MAX_INVOICE_LINES,
+            invoice_lines_omitted: basePayload.invoice_lines.length - FREE_LOCAL_MAX_INVOICE_LINES,
+            upgrade_notice: UPGRADE_NOTICE
+          };
+        }
+
+        const result = runThreeWayMatch(effectivePayload);
         return {
-          content: [{ type: "text", text: JSON.stringify({ ok: true, ...result }, null, 2) }]
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  ok: true,
+                  entitlement_tier: entitlement.tier,
+                  ...truncationMeta,
+                  ...result
+                },
+                null,
+                2
+              )
+            }
+          ]
         };
       } catch (err) {
         return formatError("reconcile_po_three_way_match", err);
@@ -251,7 +381,7 @@ export function createPoPilotServer(): McpServer {
     }
   );
 
-  // Tool 4: Stocky CSV Supplier & Lead-Time Recovery
+  // Tool 4: Stocky CSV Supplier & Lead-Time Recovery (100% Free Lead-Magnet Hook!)
   server.registerTool(
     "migrate_stocky_csv_snapshot",
     {

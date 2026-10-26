@@ -122,18 +122,19 @@ Run `reconcile_po_three_way_match` with `demo_mode: true`. Cross-check our origi
 
 ---
 
-## Pricing & Deployment (`mcpize.yaml`)
+## Pricing & Entitlements (`mcpize.yaml`)
 
-- **Self-Hosted / Local `npx`**: Free and MIT-licensed forever.
+- **Local Free Sandbox (`npx -y po-pilot-mcp`)**: `$0` — unlimited Stocky CSV supplier recovery (`migrate_stocky_csv_snapshot`), full `demo_mode`, and up to **25 SKUs / 15 invoice lines per call** via CSV or JSON.
+- **Self-Hosted Lifetime Kit ($49 one-time on Polar.sh / Gumroad)**: Unlocks **Unlimited SKUs**, **Live Shopify Admin GraphQL**, and includes **2 ready-to-import n8n workflows** (Monday Morning Slack/Email PO Generator + Supplier Invoice 3-Way Match Guard) via `PO_PILOT_LICENSE_KEY`.
 - **MCPize Managed Cloud**:
-  - **Free Tier**: `$0/month` — 1,000 requests/month (covers weekly PO runs for single-brand merchants).
-  - **Pro Tier**: `$19/month` — 50,000 requests/month (for multi-vendor wholesalers, automated daily n8n monitors, and AP finance teams).
-- **Automation Bundle ($49 one-time)**: Full TypeScript source + 2 importable n8n automation workflows (Monday Morning Slack/Email PO Generator + Supplier Invoice 3-Way Match Guard) + walkthrough guide in [`sales-bundle/`](sales-bundle/).
+  - **Free Sandbox**: `$0/month` — **15 requests/month** (instant zero-setup evaluation).
+  - **Pro Store**: `$19/month` — **300 requests/month** (unlimited SKUs + Live Shopify sync for weekly store purchasing & AP invoice audits).
+  - **Agency / Multi-Store**: `$59/month` — **2,500 requests/month** (for multi-brand operators, aggregators, and daily automated n8n monitors).
 
 ### Maintainer Publish & Deploy Commands
 
 ```bash
-# 1. Verify build, 5 automated tests, and zero security advisories
+# 1. Verify build, 9 automated tests, and zero security advisories
 npm test && npm audit
 
 # 2. Publish to npm

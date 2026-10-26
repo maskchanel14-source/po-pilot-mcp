@@ -53,6 +53,6 @@
 
 ## [2:25 – 2:45] CTA (Switch to Tab 3: n8n Workflow Canvas)
 
-> "You can install `po-pilot-mcp` free right now via `npx` or on MCPize — the first 1,000 calls every month are free, and Pro is $19/month vs $150 to $250 for legacy forecasting apps.
+> "You can test `po-pilot-mcp` free right now via `npx` or on MCPize — Stocky CSV supplier recovery is completely free, and the sandbox runs up to 25 SKUs free out of the box. Full store Pro is $19/month (300 runs/mo) or $49 one-time for the self-hosted license + n8n automation kit, vs $119 to $250/month for legacy forecasting apps.
 >
 > If you want this running hands-free every Monday morning in Slack and Gmail, grab the $49 Gumroad bundle below with the full TypeScript source code and both pre-wired n8n templates — or reach out if you want our team to wire it into your multi-warehouse Shopify + QuickBooks stack."

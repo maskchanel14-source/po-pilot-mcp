@@ -1,5 +1,5 @@
 # MCPize Deployment & Monetization Manifest — https://mcpize.com
-# Deploy: npx mcpize login && npx mcpize deploy
+# Deploy: npm install -g mcpize && mcpize login && mcpize deploy --yes
 version: 1
 name: po-pilot-mcp
 displayName: "PO Pilot — Post-Stocky Shopify Purchase Orders & 3-Way Match"
@@ -24,6 +24,14 @@ startCommand:
   command: node dist/index.js
 
 credentials:
+  - name: PO_PILOT_LICENSE_KEY
+    required: false
+    description: >-
+      Optional Pro/Lifetime license key (`<polar_org_uuid>:<license_key>` or
+      `POP1.*`) to unlock unlimited SKUs, >15 invoice lines, and live Shopify
+      Admin GraphQL sync. Omit for Free Sandbox (up to 25 SKUs/call).
+    mapping:
+      env: PO_PILOT_LICENSE_KEY
   - name: SHOPIFY_STORE_DOMAIN
     required: false
     description: >-
@@ -43,7 +51,7 @@ credentials:
 
 credentials_mode: per_user
 
-# Monetization: Free 1,000 requests/mo + Pro $19/mo (50,000 requests/mo)
+# Monetization: Free Sandbox (15 req/mo) + Pro $19/mo (300 req/mo) + Agency $59/mo (2,500 req/mo)
 pricing:
   model: freemium
   currency: USD
@@ -51,20 +59,29 @@ pricing:
     - name: free
       price: 0
       limits:
-        requests_per_month: 1000
+        requests_per_month: 15
       features:
-        - all_4_workflow_tools
-        - stocky_csv_supplier_recovery
+        - sandbox_up_to_25_skus_per_call
+        - unlimited_stocky_csv_supplier_recovery
         - demo_and_csv_modes
     - name: pro
       price: 19
       interval: month
       limits:
-        requests_per_month: 50000
+        requests_per_month: 300
       features:
+        - unlimited_skus_per_store
         - live_shopify_admin_graphql
         - multi_vendor_moq_optimization
         - ap_three_way_match_debit_memos
+    - name: agency
+      price: 59
+      interval: month
+      limits:
+        requests_per_month: 2500
+      features:
+        - multi_store_agency_operations
+        - daily_automated_n8n_workflows
         - priority_support
 
 marketplace:

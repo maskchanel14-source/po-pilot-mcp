@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
+import { createServer } from "node:http";
 import { describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { DEMO_SKU_SIGNALS, DEMO_STOCKY_PO_CSV, DEMO_SUPPLIER_RULES, DEMO_THREE_WAY_MATCH } from "../demoData.js";
+import {
+  clearEntitlementCache,
+  FREE_LOCAL_MAX_INVOICE_LINES,
+  FREE_LOCAL_MAX_SKUS,
+  mintEd25519LicenseToken,
+  resolveEntitlement
+} from "../entitlements.js";
 import { generateSupplierPurchaseOrders } from "../engines/purchaseOrder.js";
 import { computeReplenishmentPlan } from "../engines/replenishment.js";
 import { migrateStockyPoCsv } from "../engines/stockyMigration.js";
@@ -154,6 +163,158 @@ describe("End-to-End MCP Stdio Protocol Contract", () => {
       assert.equal(cardJson.tools.length, 4);
     } finally {
       proc.kill("SIGTERM");
+    }
+  });
+});
+
+describe("Open-Core Entitlements & 25-SKU Local Soft-Gate", () => {
+  it("verifies Ed25519 offline tokens and rejects tampered or expired keys", async () => {
+    clearEntitlementCache();
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const pubSpkiB64 = (publicKey.export({ type: "spki", format: "der" }) as Buffer).toString("base64");
+    const privPkcs8Pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+
+    const validToken = mintEd25519LicenseToken(
+      { sub: "merchant@austinhome.com", tier: "pro", exp: Math.floor(Date.now() / 1000) + 3600 },
+      privPkcs8Pem
+    );
+
+    const granted = await resolveEntitlement({
+      licenseKey: validToken,
+      publicKeySpkiB64: pubSpkiB64
+    });
+    assert.equal(granted.unlocked, true);
+    assert.equal(granted.tier, "pro");
+
+    // Tamper payload -> must fail cryptographic verification
+    const parts = validToken.split(".");
+    const tampered = `POP1.${Buffer.from(JSON.stringify({ sub: "hacker", tier: "agency" })).toString("base64url")}.${parts[2]}`;
+    const rejected = await resolveEntitlement({
+      licenseKey: tampered,
+      publicKeySpkiB64: pubSpkiB64
+    });
+    assert.equal(rejected.unlocked, false);
+
+    // Expired token -> must reject
+    const expiredToken = mintEd25519LicenseToken(
+      { sub: "old@store.com", tier: "pro", exp: Math.floor(Date.now() / 1000) - 60 },
+      privPkcs8Pem
+    );
+    const expiredRes = await resolveEntitlement({
+      licenseKey: expiredToken,
+      publicKeySpkiB64: pubSpkiB64
+    });
+    assert.equal(expiredRes.unlocked, false);
+  });
+
+  it("validates Polar.sh customer-portal license keys (<org_uuid>:<key>) without private keys", async () => {
+    clearEntitlementCache();
+    const orgId = "fda84e25-7b55-4d67-916d-60ead04ff61f";
+    const mockPolar = createServer(async (req, res) => {
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body) as { key: string; organization_id: string };
+      if (req.url === "/v1/customer-portal/license-keys/validate" && parsed.organization_id === orgId && parsed.key === "POLAR-LIVE-VALID") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "granted", benefit_id: "ben_123" }));
+        return;
+      }
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "revoked" }));
+    });
+
+    await new Promise<void>((resolve) => mockPolar.listen(0, "127.0.0.1", () => resolve()));
+    const addr = mockPolar.address() as { port: number };
+    const apiBaseUrl = `http://127.0.0.1:${addr.port}`;
+
+    try {
+      const okRes = await resolveEntitlement({
+        licenseKey: `${orgId}:POLAR-LIVE-VALID`,
+        polarApiBaseUrl: apiBaseUrl
+      });
+      assert.equal(okRes.unlocked, true);
+
+      const badRes = await resolveEntitlement({
+        licenseKey: `${orgId}:POLAR-INVALID`,
+        polarApiBaseUrl: apiBaseUrl
+      });
+      assert.equal(badRes.unlocked, false);
+    } finally {
+      mockPolar.close();
+    }
+  });
+
+  it("soft-gates >25 SKUs and Live Shopify locally when unlicensed, and unlocks full catalog with a valid license", async () => {
+    assert.equal(FREE_LOCAL_MAX_SKUS, 25);
+    assert.equal(FREE_LOCAL_MAX_INVOICE_LINES, 15);
+
+    const thirtySkus = Array.from({ length: 30 }, (_, idx) => ({
+      ...DEMO_SKU_SIGNALS[0],
+      sku: `BULK-SKU-${String(idx + 1).padStart(3, "0")}`
+    }));
+
+    // 1. Unlicensed local MCP run: >25 SKUs is soft-gated to 25 SKUs + upgrade notice, and live Shopify is gated
+    const unlicensedTransport = new StdioClientTransport({
+      command: "node",
+      args: ["dist/index.js"],
+      env: { PATH: process.env.PATH ?? "" }
+    });
+    const unlicensedClient = new Client({ name: "unlicensed-test", version: "1.0.0" });
+
+    try {
+      await unlicensedClient.connect(unlicensedTransport);
+
+      const repRes = await unlicensedClient.callTool({
+        name: "calculate_replenishment_plan",
+        arguments: { skus: thirtySkus }
+      });
+      assert.ok(!repRes.isError);
+      const repJson = JSON.parse((repRes.content as Array<{ type: string; text: string }>)[0].text);
+      assert.equal(repJson.ok, true);
+      assert.equal(repJson.total_skus_analyzed, 25);
+      assert.equal(repJson.truncated_by_free_tier, true);
+      assert.equal(repJson.skus_omitted, 5);
+      assert.ok(String(repJson.upgrade_notice).includes("Polar.sh"));
+
+      const liveGateRes = await unlicensedClient.callTool({
+        name: "build_supplier_purchase_orders",
+        arguments: { use_live_shopify: true }
+      });
+      const liveGateJson = JSON.parse((liveGateRes.content as Array<{ type: string; text: string }>)[0].text);
+      assert.equal(liveGateJson.upgrade_required, true);
+    } finally {
+      await unlicensedClient.close();
+    }
+
+    // 2. Licensed local MCP run: processes all 30 SKUs with zero truncation
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const pubSpkiB64 = (publicKey.export({ type: "spki", format: "der" }) as Buffer).toString("base64");
+    const privPkcs8Pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+    const proToken = mintEd25519LicenseToken({ sub: "pro@store.com", tier: "pro" }, privPkcs8Pem);
+
+    const licensedTransport = new StdioClientTransport({
+      command: "node",
+      args: ["dist/index.js"],
+      env: {
+        PATH: process.env.PATH ?? "",
+        PO_PILOT_PUBLIC_KEY_SPKI_B64: pubSpkiB64,
+        PO_PILOT_LICENSE_KEY: proToken
+      }
+    });
+    const licensedClient = new Client({ name: "licensed-test", version: "1.0.0" });
+
+    try {
+      await licensedClient.connect(licensedTransport);
+      const fullRes = await licensedClient.callTool({
+        name: "calculate_replenishment_plan",
+        arguments: { skus: thirtySkus }
+      });
+      assert.ok(!fullRes.isError);
+      const fullJson = JSON.parse((fullRes.content as Array<{ type: string; text: string }>)[0].text);
+      assert.equal(fullJson.total_skus_analyzed, 30);
+      assert.equal(Boolean(fullJson.truncated_by_free_tier), false);
+    } finally {
+      await licensedClient.close();
     }
   });
 });
