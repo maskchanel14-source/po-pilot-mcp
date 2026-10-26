@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { mapInventoryCsvToSignals, parseCsv } from "../csvUtils.js";
+import { escapeCsvCell, mapInventoryCsvToSignals, parseCsv } from "../csvUtils.js";
 import { DEMO_SKU_SIGNALS, DEMO_STOCKY_PO_CSV, DEMO_SUPPLIER_RULES, DEMO_THREE_WAY_MATCH } from "../demoData.js";
 import {
   clearEntitlementCache,
@@ -392,6 +392,32 @@ describe("PO Pilot Domain Engines", () => {
     assert.ok(parsedQbo[0].BillNo.startsWith("'@INV-77"));
     assert.ok(parsedQbo[0].Supplier.startsWith("'=CMD"));
     assert.equal(Number(parsedQbo[0].LineAmount), 50);
+
+    // Pass-5 #2: Advanced OWASP CWE-1236 vectors (+1+SUM, -2+CMD, leading whitespace/newline =CMD) vs valid negative decimal
+    assert.ok(escapeCsvCell("+1+SUM(A1:A2)").startsWith("'+1+SUM"));
+    assert.ok(escapeCsvCell("-2+CMD|'/C calc'!A0").startsWith("'-2+CMD"));
+    assert.ok(escapeCsvCell(" =CMD|'/C calc'!A0").startsWith("' =CMD"));
+    assert.ok(escapeCsvCell("\n=CMD|'/C calc'!A0").startsWith("\"'"));
+    assert.equal(escapeCsvCell("-12.50"), "-12.50");
+    assert.equal(escapeCsvCell("HO-MUG-12OZ-BLK"), "HO-MUG-12OZ-BLK");
+
+    // Pass-5 #1: Sub-mill 4-decimal wholesale price creep (10,000 units @ +$0.0005 = $5.00 overcharge) MUST flag HOLD
+    const subMillAudit = runThreeWayMatch({
+      po_number: "PO-SUBMILL-1",
+      vendor: "Bulk Poly Packaging",
+      invoice_date: "2026-02-31", // Pass-5 #4: impossible calendar date must NOT emit 2026-02-31
+      po_lines: [{ sku: "POLY-BAG-4MIL", ordered_qty: 10000, unit_cost_usd: 0.12 }],
+      receiving_lines: [{ sku: "POLY-BAG-4MIL", received_good_qty: 10000, damaged_qty: 0 }],
+      invoice_lines: [{ sku: "POLY-BAG-4MIL", billed_qty: 10000, billed_unit_cost_usd: 0.1205 }]
+    });
+    assert.equal(subMillAudit.payment_recommendation, "HOLD_AND_ISSUE_DEBIT_MEMO");
+    assert.equal(subMillAudit.total_overcharge_recovered_usd, 5);
+    assert.equal(subMillAudit.discrepancies.length, 1);
+    assert.equal(subMillAudit.discrepancies[0].issue_type, "UNIT_PRICE_OVERCHARGE");
+    assert.equal(subMillAudit.discrepancies[0].overcharge_usd, 5);
+    assert.notEqual(subMillAudit.invoice_date, "2026-02-31");
+    assert.ok(!subMillAudit.quickbooks_bill_csv.includes("2026-02-31"));
+    assert.ok(!subMillAudit.xero_bill_csv.includes("2026-02-31"));
   });
 
   it("reconstructs supplier lead times, lowercase headers, and newest-first chronological cost from Stocky CSV", () => {
@@ -755,6 +781,32 @@ describe("End-to-End MCP Stdio & Streamable HTTP + n8n Workflow Contracts", () =
         })
       );
 
+      // Pass-5 #5: Dotted SKUs ("HO.MUG.12"), 2-char SKUs ("A1"), and currency-less decimal price columns ("6.85  1,644.00")
+      const dotAndPlainPdf = runParsePdf({
+        first: () => ({
+          json: {
+            text: [
+              "INVOICE: INV-505",
+              "PO: PO-505",
+              "HO.MUG.12   Camp Mug Matte   240   6.85   1,644.00",
+              "A1   Mini Clip   50   3.00   150.00"
+            ].join("\n"),
+            po_lines: [
+              { sku: "HO.MUG.12", ordered_qty: 240, unit_cost_usd: 6.85 },
+              { sku: "A1", ordered_qty: 50, unit_cost_usd: 3.0 }
+            ]
+          }
+        })
+      })[0].json;
+      const dotLines = dotAndPlainPdf.invoice_lines as Array<{ sku: string; billed_qty: number; billed_unit_cost_usd: number }>;
+      assert.equal(dotLines.length, 2);
+      assert.equal(dotLines[0].sku, "HO.MUG.12");
+      assert.equal(dotLines[0].billed_qty, 240);
+      assert.equal(dotLines[0].billed_unit_cost_usd, 6.85);
+      assert.equal(dotLines[1].sku, "A1");
+      assert.equal(dotLines[1].billed_qty, 50);
+      assert.equal(dotLines[1].billed_unit_cost_usd, 3);
+
       const mcpPdfMatchRes = await fetch(`http://127.0.0.1:${port}/mcp`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
@@ -918,6 +970,43 @@ describe("Open-Core Entitlements & 25-SKU Urgency-Sorted Soft-Gate", () => {
       assert.equal(repJson.skus_omitted, 5);
       // Urgent SKU at row #30 MUST be included in the 25 analyzed SKUs!
       assert.ok(repJson.items.some((i: { sku: string }) => i.sku === "URGENT-ROW-30"));
+
+      // Pass-5 #3: 15 unique SKUs where SKU-15 is split across 2 pallet rows (16 raw rows) MUST NOT chop SKU-15 in half on Free Sandbox!
+      const splitFifteenPo = Array.from({ length: 15 }, (_, i) => ({
+        sku: `SPLIT-SKU-${i + 1}`,
+        ordered_qty: 100,
+        unit_cost_usd: 10
+      }));
+      const splitFifteenRec = Array.from({ length: 15 }, (_, i) => ({
+        sku: `SPLIT-SKU-${i + 1}`,
+        received_good_qty: 100,
+        damaged_qty: 0
+      }));
+      const splitFifteenInv = [
+        ...Array.from({ length: 14 }, (_, i) => ({
+          sku: `SPLIT-SKU-${i + 1}`,
+          billed_qty: 100,
+          billed_unit_cost_usd: 10
+        })),
+        { sku: "SPLIT-SKU-15", billed_qty: 50, billed_unit_cost_usd: 10 },
+        { sku: "split-sku-15", billed_qty: 50, billed_unit_cost_usd: 10 }
+      ];
+      const splitMatchRes = await unlicensedClient.callTool({
+        name: "reconcile_po_three_way_match",
+        arguments: {
+          po_number: "PO-SPLIT-15",
+          vendor: "Pallet Vendor",
+          po_lines: splitFifteenPo,
+          receiving_lines: splitFifteenRec,
+          invoice_lines: splitFifteenInv
+        }
+      });
+      const splitMatchJson = JSON.parse((splitMatchRes.content as Array<{ type: string; text: string }>)[0].text);
+      assert.equal(Boolean(splitMatchJson.truncated_by_free_tier), false);
+      assert.equal(splitMatchJson.total_po_amount_usd, 15000);
+      assert.equal(splitMatchJson.total_invoice_billed_usd, 15000);
+      assert.equal(splitMatchJson.verified_payable_amount_usd, 15000);
+      assert.equal(splitMatchJson.payment_recommendation, "APPROVE_IN_FULL");
     } finally {
       await unlicensedClient.close();
     }
