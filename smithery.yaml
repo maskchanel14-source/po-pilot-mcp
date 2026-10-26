@@ -5,6 +5,10 @@ startCommand:
     type: object
     additionalProperties: false
     properties:
+      poPilotLicenseKey:
+        type: string
+        title: PO Pilot License Key (Optional)
+        description: "Optional Polar.sh (`<org_uuid>:<key>`) or `POP1.*` key to unlock >25 SKUs and live Shopify sync."
       shopifyStoreDomain:
         type: string
         title: Shopify Store Domain (Optional)
@@ -18,6 +22,7 @@ startCommand:
       command: 'node',
       args: ['dist/index.js'],
       env: {
+        ...(config.poPilotLicenseKey ? { PO_PILOT_LICENSE_KEY: config.poPilotLicenseKey } : {}),
         ...(config.shopifyStoreDomain ? { SHOPIFY_STORE_DOMAIN: config.shopifyStoreDomain } : {}),
         ...(config.shopifyAccessToken ? { SHOPIFY_ACCESS_TOKEN: config.shopifyAccessToken } : {})
       }

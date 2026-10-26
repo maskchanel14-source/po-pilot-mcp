@@ -1,0 +1,172 @@
+import { createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
+
+export const FREE_LOCAL_MAX_SKUS = 25;
+export const FREE_LOCAL_MAX_INVOICE_LINES = 15;
+
+/**
+ * Optional creator Ed25519 SPKI public key (base64 DER) for offline `POP1.*` license tokens.
+ * Generate your own keypair locally with `node scripts/mint-license.mjs --keygen` (private key stays in `.keys/`).
+ * Polar.sh license keys (`<polar_org_uuid>:<license_key>`) work immediately without any offline keypair.
+ */
+export const DEFAULT_PUBLIC_KEY_SPKI_B64 = "";
+
+export const UPGRADE_NOTICE =
+  "Free Local Sandbox processes up to 25 SKUs (and 15 invoice lines) per call. Unlock Unlimited SKUs, full catalog PO runs, and Live Shopify Admin GraphQL with a $49 one-time License Key on Polar.sh (set PO_PILOT_LICENSE_KEY) or subscribe to PO Pilot Cloud Pro ($19/mo, 300 req/mo) / Agency ($59/mo, 2,500 req/mo) on MCPize.";
+
+export interface LicensePayload {
+  sub: string;
+  tier: "pro" | "agency" | "lifetime";
+  exp?: number;
+}
+
+export interface EntitlementResult {
+  unlocked: boolean;
+  tier: "free_local" | "pro" | "agency" | "lifetime";
+  source: "none" | "ed25519_offline" | "polar_api" | "invalid";
+  reason?: string;
+}
+
+interface CacheEntry {
+  result: EntitlementResult;
+  expiresAtMs: number;
+}
+
+const VALIDATION_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const entitlementCache = new Map<string, CacheEntry>();
+
+export function clearEntitlementCache(): void {
+  entitlementCache.clear();
+}
+
+export function mintEd25519LicenseToken(payload: LicensePayload, privateKeyPkcs8Pem: string): string {
+  const payloadB64 = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const privKey = createPrivateKey({ key: privateKeyPkcs8Pem, format: "pem", type: "pkcs8" });
+  const signature = sign(null, Buffer.from(payloadB64, "utf8"), privKey).toString("base64url");
+  return `POP1.${payloadB64}.${signature}`;
+}
+
+function verifyEd25519Token(token: string, publicKeySpkiB64: string): EntitlementResult {
+  if (!publicKeySpkiB64) {
+    return { unlocked: false, tier: "free_local", source: "invalid", reason: "missing_public_key" };
+  }
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts[0] !== "POP1") {
+    return { unlocked: false, tier: "free_local", source: "invalid", reason: "malformed_pop1_token" };
+  }
+
+  try {
+    const [, payloadB64, sigB64] = parts;
+    const pubDer = Buffer.from(publicKeySpkiB64, "base64");
+    const pubKey = createPublicKey({ key: pubDer, format: "der", type: "spki" });
+    const isValid = verify(
+      null,
+      Buffer.from(payloadB64, "utf8"),
+      pubKey,
+      Buffer.from(sigB64, "base64url")
+    );
+    if (!isValid) {
+      return { unlocked: false, tier: "free_local", source: "invalid", reason: "bad_signature" };
+    }
+
+    const parsed = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8")) as LicensePayload;
+    if (typeof parsed.exp === "number" && Math.floor(Date.now() / 1000) > parsed.exp) {
+      return { unlocked: false, tier: "free_local", source: "invalid", reason: "license_expired" };
+    }
+
+    const tier = parsed.tier === "agency" || parsed.tier === "lifetime" ? parsed.tier : "pro";
+    return { unlocked: true, tier, source: "ed25519_offline" };
+  } catch {
+    return { unlocked: false, tier: "free_local", source: "invalid", reason: "verification_exception" };
+  }
+}
+
+async function validatePolarLicenseKey(
+  organizationId: string,
+  key: string,
+  apiBaseUrl: string
+): Promise<EntitlementResult> {
+  const endpoint = `${apiBaseUrl.replace(/\/+$/, "")}/v1/customer-portal/license-keys/validate`;
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ key, organization_id: organizationId }),
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (!response.ok) {
+      return { unlocked: false, tier: "free_local", source: "invalid", reason: `polar_http_${response.status}` };
+    }
+
+    const data = (await response.json()) as { status?: string };
+    if (data.status === "granted") {
+      return { unlocked: true, tier: "pro", source: "polar_api" };
+    }
+    return { unlocked: false, tier: "free_local", source: "invalid", reason: `polar_status_${data.status ?? "unknown"}` };
+  } catch {
+    return { unlocked: false, tier: "free_local", source: "invalid", reason: "polar_network_error" };
+  }
+}
+
+export async function resolveEntitlement(options?: {
+  licenseKey?: string;
+  polarOrganizationId?: string;
+  publicKeySpkiB64?: string;
+  polarApiBaseUrl?: string;
+}): Promise<EntitlementResult> {
+  const rawKey = (
+    options?.licenseKey ??
+    process.env.PO_PILOT_LICENSE_KEY ??
+    process.env.PO_PILOT_SERVER_LICENSE_KEY ??
+    ""
+  ).trim();
+
+  if (!rawKey) {
+    return { unlocked: false, tier: "free_local", source: "none", reason: "no_license_key" };
+  }
+
+  const publicKeySpkiB64 = (
+    options?.publicKeySpkiB64 ??
+    process.env.PO_PILOT_PUBLIC_KEY_SPKI_B64 ??
+    DEFAULT_PUBLIC_KEY_SPKI_B64
+  ).trim();
+  const polarOrgEnv = (options?.polarOrganizationId ?? process.env.POLAR_ORGANIZATION_ID ?? "").trim();
+  const polarBase = (options?.polarApiBaseUrl ?? process.env.POLAR_API_BASE_URL ?? "https://api.polar.sh").trim();
+
+  const cacheKey = `${rawKey}|${polarOrgEnv}|${publicKeySpkiB64}|${polarBase}`;
+  const cached = entitlementCache.get(cacheKey);
+  if (cached && cached.expiresAtMs > Date.now()) {
+    return cached.result;
+  }
+
+  let result: EntitlementResult;
+  if (rawKey.startsWith("POP1.")) {
+    result = verifyEd25519Token(rawKey, publicKeySpkiB64);
+  } else {
+    // Support single-string `<polar_org_uuid>:<license_key>` OR `POLAR_ORGANIZATION_ID` + `PO_PILOT_LICENSE_KEY`
+    let orgId = polarOrgEnv;
+    let licenseKey = rawKey;
+    const colonIdx = rawKey.indexOf(":");
+    if (colonIdx > 0) {
+      orgId = rawKey.slice(0, colonIdx).trim();
+      licenseKey = rawKey.slice(colonIdx + 1).trim();
+    }
+
+    if (!orgId || !licenseKey) {
+      result = {
+        unlocked: false,
+        tier: "free_local",
+        source: "invalid",
+        reason: "missing_polar_organization_id"
+      };
+    } else {
+      result = await validatePolarLicenseKey(orgId, licenseKey, polarBase);
+    }
+  }
+
+  entitlementCache.set(cacheKey, {
+    result,
+    expiresAtMs: Date.now() + VALIDATION_CACHE_TTL_MS
+  });
+  return result;
+}

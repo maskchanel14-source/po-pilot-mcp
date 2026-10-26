@@ -44,7 +44,7 @@ npm publish --access public
 
 ## Langkah 3: Deploy & Monetisasi ke MCPize Cloud (Free + Pro $19/bln + USDC `x402`)
 
-File `mcpize.yaml` sudah terkonfigurasi dengan tier **Free (1.000 req/bln)** dan **Pro ($19/bln)**.
+File `mcpize.yaml` sudah terkonfigurasi dengan tier **Free Sandbox (15 req/bln)**, **Pro ($19/bln — 300 req/bln)**, dan **Agency ($59/bln — 2.500 req/bln)**, sementara mode lokal mengunci lembut di **25 SKU/panggilan** (kecuali memiliki `PO_PILOT_LICENSE_KEY` dari Polar.sh $49 atau `scripts/mint-license.mjs`).
 
 ```bash
 # 1. Install CLI resmi MCPize

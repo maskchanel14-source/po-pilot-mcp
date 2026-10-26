@@ -2,6 +2,8 @@ node_modules
 dist
 .git
 .github
+.keys
+scripts
 .env
 .env.*
 !.env.example
