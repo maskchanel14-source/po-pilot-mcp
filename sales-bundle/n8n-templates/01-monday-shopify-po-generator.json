@@ -31,7 +31,8 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"build_supplier_purchase_orders\",\n    \"arguments\": {\n      \"use_live_shopify\": true,\n      \"service_level\": \"95%\",\n      \"review_period_days\": 14,\n      \"po_prefix\": \"PO-AUTO\"\n    }\n  }\n}"
+        "jsonBody": "={{ JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'build_supplier_purchase_orders', arguments: { demo_mode: $env.PO_PILOT_DEMO_MODE === 'true', use_live_shopify: $env.PO_PILOT_DEMO_MODE !== 'true', service_level: '95%', review_period_days: 14, po_prefix: 'PO-AUTO' } } }) }}",
+        "options": {}
       },
       "id": "b1f20001-0002-4000-8000-000000000002",
       "name": "Call PO Pilot MCP (build_supplier_purchase_orders)",
@@ -41,7 +42,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json;\nconst textPayload = raw?.result?.content?.[0]?.text || '{}';\nconst parsed = JSON.parse(textPayload);\nif (!parsed.ok || !parsed.purchase_orders?.length) {\n  return [{ json: { hasOrders: false, summary: 'No SKUs crossed reorder points this week.' } }];\n}\nreturn parsed.purchase_orders.map((po) => ({\n  json: {\n    hasOrders: true,\n    po_number: po.po_number,\n    vendor: po.vendor,\n    contact_email: po.contact_email,\n    subtotal_usd: po.subtotal_usd,\n    total_units: po.total_units,\n    moq_notes: po.moq_notes,\n    shopify_draft_po_csv: po.shopify_draft_po_csv,\n    vendor_email_markdown: po.vendor_email_markdown\n  }\n}));"
+        "jsCode": "const raw = $input.first().json;\nlet envelope = raw;\nif (typeof raw?.data === 'string' && raw.data.includes('data:')) {\n  const dataLine = raw.data.split(/\\r?\\n/).find((l) => l.startsWith('data:'));\n  if (dataLine) envelope = JSON.parse(dataLine.slice(5).trim());\n}\nconst textPayload = envelope?.result?.content?.[0]?.text;\nif (!textPayload) {\n  throw new Error('Unexpected MCP response payload: ' + JSON.stringify(raw));\n}\nconst parsed = JSON.parse(textPayload);\nif (!parsed.ok) {\n  throw new Error(parsed.message || parsed.error || 'PO Pilot MCP returned an error');\n}\nif (!parsed.purchase_orders?.length) {\n  return [{ json: { hasOrders: false, summary: 'No SKUs crossed reorder points this week.' } }];\n}\nreturn parsed.purchase_orders.map((po) => ({\n  json: {\n    hasOrders: true,\n    po_number: po.po_number,\n    vendor: po.vendor,\n    contact_email: po.contact_email,\n    subtotal_usd: po.subtotal_usd,\n    estimated_duty_usd: po.estimated_duty_usd,\n    estimated_freight_usd: po.estimated_freight_usd,\n    total_landed_cost_usd: po.total_landed_cost_usd,\n    margin_erosion_skus_count: po.margin_erosion_skus_count,\n    total_units: po.total_units,\n    moq_notes: po.moq_notes,\n    shopify_draft_po_csv: po.shopify_draft_po_csv,\n    shopify_transfer_import_csv: po.shopify_transfer_import_csv,\n    vendor_email_markdown: po.vendor_email_markdown\n  }\n}));"
       },
       "id": "b1f20001-0003-4000-8000-000000000003",
       "name": "Parse Supplier POs & Shopify CSVs",
@@ -52,24 +53,46 @@
     {
       "parameters": {
         "conditions": {
-          "boolean": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
             {
-              "value1": "={{ $json.hasOrders }}",
-              "value2": true
+              "id": "b1f20001-cond-4000-8000-000000000004",
+              "leftValue": "={{ $json.hasOrders }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
             }
-          ]
-        }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
       "id": "b1f20001-0004-4000-8000-000000000004",
       "name": "Any POs Needed?",
       "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
+      "typeVersion": 2.2,
       "position": [980, 300]
     },
     {
       "parameters": {
-        "channel": "#purchasing-ops",
-        "text": "=*New Draft Purchase Order Ready:* `{{ $json.po_number }}` for *{{ $json.vendor }}*\n• *Units:* {{ $json.total_units }} | *Subtotal:* ${{ $json.subtotal_usd }}\n• *MOQ Check:* {{ $json.moq_notes }}\n\n*Shopify Admin Draft PO CSV:*\n```{{ $json.shopify_draft_po_csv }}```"
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#purchasing-ops"
+        },
+        "text": "=*New Draft Purchase Order Ready:* `{{ $json.po_number }}` for *{{ $json.vendor }}*\n• *Units:* {{ $json.total_units }} | *FOB Subtotal:* ${{ $json.subtotal_usd }} | *Est. Landed Total:* ${{ $json.total_landed_cost_usd }}\n• *MOQ / OTB Check:* {{ $json.moq_notes }}\n\n*Shopify Admin Draft PO CSV:*\n```{{ $json.shopify_draft_po_csv }}```\n*Shopify POS Inventory Transfer CSV (`SKU,Barcode,Quantity`):*\n```{{ $json.shopify_transfer_import_csv }}```",
+        "otherOptions": {}
       },
       "id": "b1f20001-0005-4000-8000-000000000005",
       "name": "Post PO + CSV to Slack #purchasing-ops",

@@ -1,4 +1,4 @@
-import { parseCsv } from "../csvUtils.js";
+import { parseCsv, parseNumber, pickField } from "../csvUtils.js";
 import type { SupplierRule } from "../types.js";
 
 export interface ReconstructedSupplierProfile {
@@ -30,7 +30,7 @@ function gcd(a: number, b: number): number {
 
 /**
  * Rebuilds un-exportable supplier directory, real lead times, carton multiples,
- * and cost history from Stocky Purchase Order CSV exports before read-only sunset.
+ * and chronological latest cost history from Stocky Purchase Order CSV exports.
  */
 export function migrateStockyPoCsv(rawCsv: string): {
   suppliers_recovered: number;
@@ -39,36 +39,56 @@ export function migrateStockyPoCsv(rawCsv: string): {
   ready_supplier_rules_json: SupplierRule[];
 } {
   const rows = parseCsv(rawCsv);
-  const vendorBuckets = new Map<string, Array<Record<string, string>>>();
+  const vendorBuckets = new Map<
+    string,
+    { displayVendor: string; entries: Array<{ row: Record<string, string>; createdMs: number | null; rowIdx: number }> }
+  >();
 
-  for (const row of rows) {
-    const vendor = (row["Supplier"] || row["Vendor"] || row["Supplier Name"] || "").trim();
-    if (!vendor) continue;
-    const list = vendorBuckets.get(vendor) ?? [];
-    list.push(row);
-    vendorBuckets.set(vendor, list);
-  }
+  rows.forEach((row, rowIdx) => {
+    const vendor = pickField(row, ["Supplier", "Vendor", "Supplier Name"]).trim();
+    if (!vendor) return;
+    const vendorKey = vendor.toLowerCase();
+    const createdStr = pickField(row, ["Created At", "Order Date", "PO Date", "Date"]);
+    const parsedCreated = createdStr ? Date.parse(createdStr) : NaN;
+    const bucket = vendorBuckets.get(vendorKey) ?? { displayVendor: vendor, entries: [] };
+    bucket.entries.push({
+      row,
+      createdMs: Number.isFinite(parsedCreated) ? parsedCreated : null,
+      rowIdx
+    });
+    vendorBuckets.set(vendorKey, bucket);
+  });
 
   const profiles: ReconstructedSupplierProfile[] = [];
   const rules: SupplierRule[] = [];
   let totalSkus = 0;
 
-  for (const [vendor, vRows] of vendorBuckets.entries()) {
+  for (const { displayVendor: vendor, entries } of vendorBuckets.values()) {
+    // Sort chronologically oldest -> newest so latestCost always reflects the most recent PO
+    // even when Stocky/Shopify exports rows newest-first (descending).
+    const chronological = [...entries].sort((a, b) => {
+      if (a.createdMs !== null && b.createdMs !== null && a.createdMs !== b.createdMs) {
+        return a.createdMs - b.createdMs;
+      }
+      return a.rowIdx - b.rowIdx;
+    });
+
     const poTotals = new Map<string, { units: number; usd: number; leadDays: number | null }>();
-    const skuStats = new Map<string, { title: string; latestCost: number; quantities: number[] }>();
+    const skuStats = new Map<string, { displaySku: string; title: string; latestCost: number; quantities: number[] }>();
 
-    for (const r of vRows) {
-      const poNum = (r["PO Number"] || r["Purchase Order"] || r["ID"] || "PO-UNKNOWN").trim();
-      const sku = (r["SKU"] || r["Variant SKU"] || "").trim();
-      const title = (r["Product Title"] || r["Product"] || r["Title"] || sku).trim();
-      const qty = Math.max(0, Math.round(Number((r["Quantity Ordered"] || r["Quantity"] || "0").replace(/[^0-9.-]/g, "")) || 0));
-      const cost = Math.max(0, Number((r["Cost Price"] || r["Unit Cost"] || r["Cost"] || "0").replace(/[^0-9.-]/g, "")) || 0);
+    for (const { row: r, createdMs } of chronological) {
+      const poNum = pickField(r, ["PO Number", "Purchase Order", "PO", "ID"]).trim() || "PO-UNKNOWN";
+      const sku = pickField(r, ["SKU", "Variant SKU"]).trim();
+      const title = pickField(r, ["Product Title", "Product", "Title", "Name"]).trim() || sku;
+      const qty = Math.max(0, Math.round(parseNumber(pickField(r, ["Quantity Ordered", "Ordered Qty", "Quantity"]), 0)));
+      const cost = Math.max(0, parseNumber(pickField(r, ["Cost Price", "Unit Cost", "Cost", "Cost per item"]), 0));
 
-      const created = Date.parse(r["Created At"] || r["Order Date"] || "");
-      const received = Date.parse(r["Received At"] || r["Delivery Date"] || "");
-      const leadDays = Number.isFinite(created) && Number.isFinite(received) && received >= created
-        ? Math.max(1, Math.round((received - created) / 86_400_000))
-        : null;
+      const receivedStr = pickField(r, ["Received At", "Delivery Date", "Closed At"]);
+      const receivedMs = receivedStr ? Date.parse(receivedStr) : NaN;
+      const leadDays =
+        createdMs !== null && Number.isFinite(receivedMs) && receivedMs >= createdMs
+          ? Math.max(1, Math.round((receivedMs - createdMs) / 86_400_000))
+          : null;
 
       const curPo = poTotals.get(poNum) ?? { units: 0, usd: 0, leadDays };
       curPo.units += qty;
@@ -77,10 +97,13 @@ export function migrateStockyPoCsv(rawCsv: string): {
       poTotals.set(poNum, curPo);
 
       if (sku) {
-        const curSku = skuStats.get(sku) ?? { title, latestCost: cost, quantities: [] };
+        const skuKey = sku.toUpperCase();
+        const curSku = skuStats.get(skuKey) ?? { displaySku: sku, title, latestCost: cost, quantities: [] };
+        curSku.displaySku = sku;
+        if (title) curSku.title = title;
         if (cost > 0) curSku.latestCost = cost;
         if (qty > 0) curSku.quantities.push(qty);
-        skuStats.set(sku, curSku);
+        skuStats.set(skuKey, curSku);
       }
     }
 
@@ -94,10 +117,10 @@ export function migrateStockyPoCsv(rawCsv: string): {
     const minUnits = poUnits.length > 0 ? Math.min(...poUnits) : 0;
     const minUsd = poUsd.length > 0 ? Math.floor(Math.min(...poUsd) / 50) * 50 : 0;
 
-    const skus = [...skuStats.entries()].map(([sku, st]) => {
+    const skus = [...skuStats.values()].map((st) => {
       const pack = st.quantities.length > 0 ? st.quantities.reduce((acc, q) => gcd(acc, q)) : 1;
       return {
-        sku,
+        sku: st.displaySku,
         title: st.title,
         latest_unit_cost_usd: Number(st.latestCost.toFixed(2)),
         inferred_case_pack: pack > 100 ? 1 : pack,
@@ -120,7 +143,7 @@ export function migrateStockyPoCsv(rawCsv: string): {
       vendor,
       payment_terms: "Net 30",
       currency: "USD",
-      lead_time_days: Math.round(avgLead),
+      lead_time_days: Math.max(1, Math.round(avgLead)),
       min_order_units: minUnits,
       min_order_value_usd: minUsd,
       ship_to_location: "Main US Warehouse"

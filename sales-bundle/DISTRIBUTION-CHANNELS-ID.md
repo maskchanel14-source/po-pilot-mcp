@@ -2,7 +2,7 @@
 
 *Disusun dengan skill `market-research` & `finance-billing-ops` — diverifikasi per Oktober 2026.*
 
-Jangan pernah bergantung pada Gumroad saja (Gumroad memotong **10% + $0.50** untuk link langsung dan **30%** dari fitur Gumroad Discover). Aset yang sudah Anda miliki di repo ini (**MCP Server TypeScript + 2 Workflow n8n + Keahlian Domain Post-Stocky**) bisa dijual serentak di **12 kanal $0 modal awal** yang ramah pencairan dana ke Indonesia (Rekening BCA/Mandiri, Wise USD, Payoneer, PayPal, atau USDC Base).
+Jangan pernah bergantung pada Gumroad saja (Gumroad memotong **10% + $0.50** untuk link langsung dan **30%** dari fitur Gumroad Discover). Aset yang sudah Anda miliki di repo ini (**MCP Server TypeScript + 3 Workflow n8n `#01/#02/#03` + Keahlian Domain Post-Stocky & AP QuickBooks/Xero**) bisa dijual serentak di **12 kanal $0 modal awal** yang ramah pencairan dana ke Indonesia (Rekening BCA/Mandiri, Wise USD, Payoneer, PayPal, atau USDC Base).
 
 ---
 
@@ -10,14 +10,14 @@ Jangan pernah bergantung pada Gumroad saja (Gumroad memotong **10% + $0.50** unt
 
 | # | Platform | Apa yang Dijual | Potongan / Bagi Hasil | Cara Cair ke Surabaya (ID) | Prioritas |
 | --- | --- | --- | --- | --- | --- |
-| 1 | **Polar.sh** | Bundle $49, License Key, Private Repo Pro $19/bln | **5% + $0.50** (MoR, pajak AS beres) | Stripe Connect Express (**🇮🇩 Indonesia didukung resmi**) → Bank Lokal | **WAJIB #1** |
-| 2 | **Lemon Squeezy** | Bundle $49 (Source + n8n + SOP PDF) | **5% + $0.50** (MoR) | Transfer Bank Lokal Indonesia / PayPal | **WAJIB #2** |
-| 3 | **MCPize** | Hosted MCP Pro ($19/bln) + **x402 Pay-Per-Call** | Kreator dapat **80%** | **USDC di jaringan Base (x402)** instan ke wallet crypto / Stripe | **WAJIB #3** |
-| 4 | **Apify Store** | Hosted MCP Server (*Pay-Per-Event*, misal $0.05/PO) | **80%** dikurangi compute (~70–75% bersih) | PayPal (min. $20) / Bank Transfer (min. $100) tiap bulan | Tinggi |
+| 1 | **Polar.sh** | Early-Bird $49 → Regular $99 Solo / $249 Agency (10 toko) | **5% + $0.50** (MoR, pajak AS beres) | Stripe Connect Express (**🇮🇩 Indonesia didukung resmi**) → Bank Lokal | **WAJIB #1** |
+| 2 | **Lemon Squeezy** | Bundle $49 Early-Bird / $99 Solo / $249 Agency | **5% + $0.50** (MoR) | Transfer Bank Lokal Indonesia / PayPal | **WAJIB #2** |
+| 3 | **MCPize** | Cloud Pro ($29/bln), Agency ($79/bln) + **x402 USDC** | Kreator dapat **80%** | **USDC di jaringan Base (x402)** instan ke wallet crypto / Stripe | **WAJIB #3** |
+| 4 | **Apify Store** | Hosted MCP Server (*Pay-Per-Event*, $0.06/PO, $0.10/Audit) | **80%** dikurangi compute (~70–75% bersih) | PayPal (min. $20) / Bank Transfer (min. $100) tiap bulan | Tinggi |
 | 5 | **n8n Creator Hub** | 3 Workflow Gratis → buka akses **Paid Templates** + Affiliate | **0%** dari n8n (pakai link Polar/Gumroad) + **30% komisi afiliasi 12 bln** | Sesuai link checkout Anda + payout afiliasi n8n | Tinggi |
-| 6 | **n8n Markets & AutomationWorkflows.io** | Template n8n `#01` & `#02` ($39–$79) | **15%** (AutomationWorkflows.io) | PayPal / Wise / Stripe Express | Menengah |
-| 7 | **Upwork** | Jasa Setup Post-Stocky ($500 / $950 / $1.500) | **10%** freelancer fee | Direct to Local Bank (BCA/Mandiri) / Wise USD / Payoneer | **UANG TERCEPAT** |
-| 8 | **Contra.com** | Productized Service Setup ($750–$1.500) | **0% komisi kreator!** | Wise USD / Bank Lokal | **UANG TERCEPAT** |
+| 6 | **n8n Markets & AutomationWorkflows.io** | Paket 3 Template n8n `#01`, `#02`, `#03` ($49–$99) | **15%** (AutomationWorkflows.io) | PayPal / Wise / Stripe Express | Menengah |
+| 7 | **Upwork** | Jasa Setup Post-Stocky + QBO/Xero ($750 / $1.450 / $2.500) | **10%** freelancer fee | Direct to Local Bank (BCA/Mandiri) / Wise USD / Payoneer | **UANG TERCEPAT** |
+| 8 | **Contra.com** | Productized Service Setup ($750–$2.500) | **0% komisi kreator!** | Wise USD / Bank Lokal | **UANG TERCEPAT** |
 | 9 | **n8n Forum (`community.n8n.io/c/jobs`)** | Subkontrak agensi AS & klien langsung ($500–$2.500) | **0%** (invoice langsung) | Wise USD Invoice / Crypto USDC | Tinggi |
 | 10 | **Fiverr** | Paket instalasi MCP + Shopify PO Bot ($150 / $450 / $950) | **20%** | Payoneer / PayPal | Menengah |
 | 11 | **Smithery, Glama & Official MCP Registry** | Listing gratis sebagai **mesin trafik B2B** ke Polar/MCPize | Gratis (0%) | Mengalirkan pembeli ke Polar / MCPize / Upwork | Wajib SEO |

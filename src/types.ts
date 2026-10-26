@@ -9,6 +9,11 @@ export const ServiceLevelSchema = z
 
 export const SkuSignalSchema = z.object({
   sku: z.string().min(1).max(120).describe("Unique variant SKU code matching Shopify Variant SKU."),
+  barcode: z
+    .string()
+    .max(80)
+    .optional()
+    .describe("Optional UPC/EAN/GTIN barcode for Shopify POS scanner receiving and Transfers CSV bulk import."),
   title: z.string().min(1).max(250).describe("Human-readable product + variant title."),
   vendor: z.string().min(1).max(160).describe("Supplier or vendor name."),
   on_hand: z.number().int().min(-100000).max(10000000).describe("Physical units currently in warehouse."),
@@ -37,6 +42,20 @@ export const SupplierRuleSchema = z.object({
   lead_time_days: z.number().min(1).max(365).optional().describe("Overrides default lead time for all SKUs from this vendor."),
   min_order_units: z.number().int().min(0).max(10000000).default(0).describe("Vendor-wide minimum total units per Purchase Order."),
   min_order_value_usd: z.number().min(0).max(100000000).default(0).describe("Vendor-wide minimum PO dollar subtotal (e.g., $1,500 minimum or free-freight threshold)."),
+  import_duty_pct: z
+    .number()
+    .min(0)
+    .max(200)
+    .default(0)
+    .optional()
+    .describe("Estimated US import tariff / customs duty percentage applied to FOB merchandise cost (e.g., 25 for 25% Section 301 tariff)."),
+  estimated_freight_usd: z
+    .number()
+    .min(0)
+    .max(10000000)
+    .default(0)
+    .optional()
+    .describe("Estimated ocean/air/LTL freight + drayage cost in USD for this supplier shipment, allocated across PO lines for true landed cost."),
   ship_to_location: z.string().max(200).default("Main US Warehouse").describe("Destination Shopify warehouse/location name.")
 });
 
@@ -44,6 +63,7 @@ export type SupplierRule = z.infer<typeof SupplierRuleSchema>;
 
 export interface ReplenishmentItemResult {
   sku: string;
+  barcode?: string;
   title: string;
   vendor: string;
   abc_class: "A" | "B" | "C";
@@ -60,6 +80,7 @@ export interface ReplenishmentItemResult {
   case_pack: number;
   sku_moq: number;
   unit_cost_usd: number;
+  retail_price_usd: number;
   lead_time_days: number;
 }
 

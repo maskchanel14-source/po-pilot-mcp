@@ -20,8 +20,8 @@ Most of the Stocky replacement apps we looked at wanted $99–$249/month once yo
 So I built a small MIT-licensed MCP server in TypeScript (`po-pilot-mcp`) that runs locally in Claude Desktop / Cursor (or via n8n) with no database and no required API keys:
 
 - **`migrate_stocky_csv_snapshot`**: Drop in your exported Stocky Purchase Orders CSV. It computes each vendor's actual observed lead time (average + standard deviation between Created At and Received At dates), infers carton pack multiples from historical order quantities, grabs your latest unit cost per SKU, and outputs a clean supplier rules file.
-- **`build_supplier_purchase_orders`**: Takes a Shopify Products/Inventory CSV (or optional read-only Shopify Admin API token), calculates stockout-adjusted daily velocity + Z-score safety stock, rounds up to carton multiples, tops up your fastest-selling A-tier SKU if a PO is $80 shy of a vendor's free-freight/MOQ minimum, and spits out the exact `SKU,Supplier SKU,Quantity,Cost,Tax %` CSV that Shopify Admin's native Draft PO uploader expects.
-- **`reconcile_po_three_way_match`**: Compares your PO lines vs warehouse dock receiving vs the supplier's invoice so you catch silent $0.35/unit price hikes or short-shipped cartons before paying the bill.
+- **`build_supplier_purchase_orders`**: Takes a Shopify Products/Inventory CSV (or optional read-only Shopify Admin API token), calculates stockout-adjusted daily velocity + Z-score safety stock, rounds up to carton multiples, tops up your fastest-selling A-tier SKU if a PO is $80 shy of a vendor's free-freight/MOQ minimum, computes US import tariff + freight landed unit costs (with optional Open-to-Buy `max_cash_budget_usd` cash rationing), and spits out both the `SKU,Supplier SKU,Quantity,Cost,Tax %` Draft PO CSV and the `SKU,Barcode,Quantity` Transfers CSV for Shopify POS barcode receiving.
+- **`reconcile_po_three_way_match`**: Compares your PO lines vs warehouse dock receiving vs the supplier's invoice so you catch silent $0.35/unit price hikes or short-shipped cartons before paying the bill, then outputs both a Vendor Debit Memo and verified-only QuickBooks Online / Xero Bill CSVs.
 
 It's free and MIT-licensed on GitHub / npm (`npx -y po-pilot-mcp@1.0.0`), and includes a `demo_mode: true` flag if you want to test the math before touching any store data:
 
@@ -43,6 +43,6 @@ Quick ops question for wholesalers/flippers doing 3+ rehabs or holding wholesale
 
 We kept seeing contractors and material suppliers bill full carton quantities when 10–15% arrived cracked at the job site, or quietly bump unit prices by 6–8% vs the original quote sheet.
 
-I wired up a small open-source 3-way match + MOQ Purchase Order MCP tool (`po-pilot-mcp`, MIT license on GitHub) that cross-checks original PO unit prices vs on-sitegood received counts vs the vendor invoice inside Claude, then writes the exact credit/debit memo before releasing final draw payment.
+I wired up a small open-source 3-way match + MOQ Purchase Order MCP tool (`po-pilot-mcp`, MIT license on GitHub) that cross-checks original PO unit prices vs on-site good received counts vs the vendor invoice inside Claude, then writes the exact credit/debit memo before releasing final draw payment.
 
 Curious if anyone else here automates material POs / draw audits in n8n or if everyone still tracks SKU quotes in Google Sheets?

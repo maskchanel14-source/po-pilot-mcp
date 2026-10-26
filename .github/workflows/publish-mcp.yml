@@ -26,16 +26,53 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           cache: "npm"
 
+      - name: Verify version parity across package.json, server.json & git tag
+        run: |
+          PKG_VER=$(node -p "require('./package.json').version")
+          SRV_VER=$(node -p "require('./server.json').version")
+          SRV_PKG_VER=$(node -p "require('./server.json').packages[0].version")
+          if [ "$PKG_VER" != "$SRV_VER" ] || [ "$PKG_VER" != "$SRV_PKG_VER" ]; then
+            echo "Version mismatch: package.json=$PKG_VER, server.json=$SRV_VER ($SRV_PKG_VER)"
+            exit 1
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            TAG_VER="${GITHUB_REF#refs/tags/v}"
+            if [ "$TAG_VER" != "$PKG_VER" ]; then
+              echo "Git tag v$TAG_VER does not match package.json version $PKG_VER"
+              exit 1
+            fi
+          fi
+
       - name: Install dependencies & verify test suite
         run: |
           npm ci
           npm audit --audit-level=high
           npm test
 
-      - name: Publish package to npm
-        run: npm publish --provenance --access public
+      - name: Publish package to npm (idempotent on re-run)
+        run: |
+          PKG_VER=$(node -p "require('./package.json').version")
+          if npm view "po-pilot-mcp@${PKG_VER}" version >/dev/null 2>&1; then
+            echo "po-pilot-mcp@${PKG_VER} is already published on npm — skipping npm publish."
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Wait for npm registry CDN propagation before MCP Registry check
+        run: |
+          PKG_VER=$(node -p "require('./package.json').version")
+          for i in $(seq 1 12); do
+            if curl -fsS "https://registry.npmjs.org/po-pilot-mcp/${PKG_VER}" >/dev/null 2>&1; then
+              echo "Verified po-pilot-mcp@${PKG_VER} live on registry.npmjs.org"
+              exit 0
+            fi
+            echo "Waiting for npm propagation (attempt $i/12)..."
+            sleep 5
+          done
+          echo "Timed out waiting for npm propagation"
+          exit 1
 
       - name: Install Sigstore cosign
         uses: sigstore/cosign-installer@v4.1.2

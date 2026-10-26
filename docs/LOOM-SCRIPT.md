@@ -36,23 +36,23 @@
 > 2. Every line is rounded cleanly to vendor carton multiples — 24 per box for mugs, 12 for flasks.
 > 3. Pacific Stainless has a $2,200 minimum order for wholesale terms. When natural restock came in just short, PO Pilot automatically added cartons to our fastest A-class SKU instead of padding dead stock.
 >
-> Right below that, it spits out the exact `SKU,Supplier SKU,Quantity,Cost,Tax %` CSV ready to drop straight into **Shopify Admin -> Purchase Orders -> Import CSV**, plus the formatted vendor email."
+> Right below that, it computes true landed unit cost after US import tariffs and freight, honors an optional Open-to-Buy cash ceiling, and spits out both the `SKU,Supplier SKU,Quantity,Cost,Tax %` CSV for **Shopify Admin -> Purchase Orders** AND the `SKU,Barcode,Quantity` CSV for **Shopify Admin -> Transfers** so retail staff can scan incoming boxes with Shopify POS barcode scanners."
 
-## [1:45 – 2:25] Step 3: Finance Ops 3-Way Match Audit (Catching Vendor Overcharges)
+## [1:45 – 2:25] Step 3: Finance Ops 3-Way Match Audit + QuickBooks/Xero Bill CSV
 
 > "Finally, three weeks later the shipment hits your 3PL and the vendor sends a PDF invoice. Watch what happens when we run `reconcile_po_three_way_match`."
 
 *(Run Prompt 3 on screen)*
 
-> "PO Pilot flags `$429.80` in overcharges instantly:
-> - A silent 45-cent unit price hike on 240 mugs (`$108.00`),
-> - 12 damaged mugs and 12 short-shipped flasks billed as if they arrived (`$187.80`),
-> - An unapproved `$65` pallet-wrap surcharge, and `$90` above our agreed freight cap.
+> "PO Pilot flags `$450.80` in overcharges instantly (`$2,837.00` billed vs `$2,386.20` verified payable):
+> - A silent 45-cent unit price hike plus 12 damaged mugs on `HO-MUG-12OZ-BLK` (`$184.80`),
+> - 12 short-shipped flasks billed as if they arrived (`$111.00`),
+> - An unapproved `$65.00` pallet-wrap surcharge, and `$90.00` above our agreed `$150.00` freight cap.
 >
-> It tells Finance Ops: **HOLD_AND_ISSUE_DEBIT_MEMO**, computes the exact verified payable dollar amount, and writes the Debit Memo email to the vendor's AR team."
+> It tells Finance Ops: **HOLD_AND_ISSUE_DEBIT_MEMO**, exports ready-to-import **QuickBooks Online** and **Xero** Bill CSVs containing only the verified `$2,386.20` lines, and writes the Debit Memo email to the vendor's AR team."
 
 ## [2:25 – 2:45] CTA (Switch to Tab 3: n8n Workflow Canvas)
 
-> "You can test `po-pilot-mcp` free right now via `npx` or on MCPize — Stocky CSV supplier recovery is completely free, and the sandbox runs up to 25 SKUs free out of the box. Full store Pro is $19/month (300 runs/mo) or $49 one-time for the self-hosted license + n8n automation kit, vs $119 to $250/month for legacy forecasting apps.
+> "You can test `po-pilot-mcp` free right now via `npx` or on MCPize — Stocky CSV supplier recovery is completely free, and the sandbox runs up to 25 SKUs free out of the box. Cloud Pro is $29/month (500 runs/mo), or grab the self-hosted lifetime kit for $49 during our first-25-buyers Early-Bird launch ($99 regular Solo / $249 Agency), vs $119 to $350/month for legacy forecasting and AP apps.
 >
-> If you want this running hands-free every Monday morning in Slack and Gmail, grab the $49 Gumroad bundle below with the full TypeScript source code and both pre-wired n8n templates — or reach out if you want our team to wire it into your multi-warehouse Shopify + QuickBooks stack."
+> Grab the Polar.sh / Gumroad bundle below with the full TypeScript source code and all 3 pre-wired n8n templates — including automatic IMAP email PDF invoice 3-way matching — or reach out if you want our team to wire it into your multi-warehouse Shopify + QuickBooks/Xero stack."

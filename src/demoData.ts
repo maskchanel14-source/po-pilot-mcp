@@ -5,6 +5,7 @@ export const DEMO_STORE_NAME = "Harbor & Oak Supply Co. (Austin, TX — Demo Sto
 export const DEMO_SKU_SIGNALS: SkuSignal[] = [
   {
     sku: "HO-MUG-12OZ-BLK",
+    barcode: "850041920101",
     title: "Double-Wall Camp Mug 12oz - Matte Black",
     vendor: "Pacific Stainless Works",
     on_hand: 42,
@@ -23,6 +24,7 @@ export const DEMO_SKU_SIGNALS: SkuSignal[] = [
   },
   {
     sku: "HO-MUG-12OZ-OLV",
+    barcode: "850041920102",
     title: "Double-Wall Camp Mug 12oz - Olive Drab",
     vendor: "Pacific Stainless Works",
     on_hand: 95,
@@ -41,6 +43,7 @@ export const DEMO_SKU_SIGNALS: SkuSignal[] = [
   },
   {
     sku: "HO-FLASK-32OZ-RAW",
+    barcode: "850041920103",
     title: "Trail Vacuum Flask 32oz - Brushed Steel",
     vendor: "Pacific Stainless Works",
     on_hand: 18,
@@ -59,6 +62,7 @@ export const DEMO_SKU_SIGNALS: SkuSignal[] = [
   },
   {
     sku: "HO-APRON-WAX-TAN",
+    barcode: "850041920201",
     title: "Heavyweight Waxed Canvas Shop Apron - Field Tan",
     vendor: "Blue Ridge Textiles LLC",
     on_hand: 11,
@@ -77,6 +81,7 @@ export const DEMO_SKU_SIGNALS: SkuSignal[] = [
   },
   {
     sku: "HO-TOTE-WAX-NVY",
+    barcode: "850041920202",
     title: "Utility Market Tote 18oz Canvas - Navy",
     vendor: "Blue Ridge Textiles LLC",
     on_hand: 26,
@@ -95,6 +100,7 @@ export const DEMO_SKU_SIGNALS: SkuSignal[] = [
   },
   {
     sku: "HO-WAX-TIN-4OZ",
+    barcode: "850041920301",
     title: "Beeswax Canvas Reproofing Tin 4oz",
     vendor: "Ozark Apothecary Co.",
     on_hand: 410,
@@ -121,6 +127,8 @@ export const DEMO_SUPPLIER_RULES: SupplierRule[] = [
     currency: "USD",
     min_order_units: 120,
     min_order_value_usd: 2200,
+    import_duty_pct: 10,
+    estimated_freight_usd: 150,
     ship_to_location: "Austin 3PL Fulfillment Center"
   },
   {
@@ -130,6 +138,8 @@ export const DEMO_SUPPLIER_RULES: SupplierRule[] = [
     currency: "USD",
     min_order_units: 30,
     min_order_value_usd: 1200,
+    import_duty_pct: 0,
+    estimated_freight_usd: 85,
     ship_to_location: "Austin 3PL Fulfillment Center"
   },
   {
@@ -139,6 +149,8 @@ export const DEMO_SUPPLIER_RULES: SupplierRule[] = [
     currency: "USD",
     min_order_units: 48,
     min_order_value_usd: 300,
+    import_duty_pct: 0,
+    estimated_freight_usd: 45,
     ship_to_location: "Austin 3PL Fulfillment Center"
   }
 ];

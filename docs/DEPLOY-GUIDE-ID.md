@@ -8,7 +8,7 @@ Ikuti urutan **6 langkah** di bawah ini karena beberapa registry saling membutuh
 
 ## Langkah 1: Push & Merge ke Branch `main` di GitHub
 
-Saat ini seluruh kode berada di working branch Arena (`arena/c9d6d95d-po-pilot-mcp`). Agar marketplace membaca kode Anda dari repo publik `https://github.com/maskchanel14-source/po-pilot-mcp`:
+Saat ini seluruh kode berada di working branch Arena (`arena/0a7ca7bf-po-pilot-mcp` — Pull Request `#3`). Agar marketplace membaca kode Anda dari repo publik `https://github.com/maskchanel14-source/po-pilot-mcp`:
 
 1. Commit & push branch ini lalu buat Pull Request ke `main` (bisa minta saya jalankan langsung di chat ini: *"tolong commit, push, dan buat/merge PR ke main"*).
 2. Pastikan repo GitHub berstatus **Public** agar skor inspeksi Glama, Smithery, dan GitHub OIDC berjalan gratis.
@@ -42,9 +42,9 @@ npm publish --access public
 
 ---
 
-## Langkah 3: Deploy & Monetisasi ke MCPize Cloud (Free + Pro $19/bln + USDC `x402`)
+## Langkah 3: Deploy & Monetisasi ke MCPize Cloud (Free + Cloud Pro $29/bln + Agency $79/bln + USDC `x402`)
 
-File `mcpize.yaml` sudah terkonfigurasi dengan tier **Free Sandbox (15 req/bln)**, **Pro ($19/bln — 300 req/bln)**, dan **Agency ($59/bln — 2.500 req/bln)**, sementara mode lokal mengunci lembut di **25 SKU/panggilan** (kecuali memiliki `PO_PILOT_LICENSE_KEY` dari Polar.sh $49 atau `scripts/mint-license.mjs`).
+File `mcpize.yaml` sudah tervalidasi ketat terhadap skema Zod resmi `mcpize@1.2.2`. Setelah `mcpize deploy --yes`, atur tier langganan di **MCPize Developer Dashboard → Monetization**: **Free Sandbox (15 req/bln)**, **Cloud Pro ($29/bln — 500 req/bln)**, dan **Cloud Agency ($79/bln — 3.000 req/bln)**, serta isi secret `PO_PILOT_SERVER_LICENSE_KEY` agar pelanggan cloud Pro/Agency Anda bebas dari batas lokal 25 SKU/panggilan.
 
 ```bash
 # 1. Install CLI resmi MCPize
@@ -71,18 +71,13 @@ Karena kita sudah menyertakan **`Dockerfile`** multi-stage + `glama.json` + `smi
 3. Setelah terindeks, klik **"Claim Server"** dengan login GitHub `maskchanel14-source` (cocok dengan field `"maintainers"` di `glama.json`) agar mendapat lencana verified & skor **A**.
 
 ### B. Smithery (`smithery.ai`)
-```bash
-npm install -g @smithery/cli
-smithery login
-smithery deploy
-```
-*(Atau buka `https://smithery.ai/new` → pilih repo `maskchanel14-source/po-pilot-mcp` → Deploy).*
+Buka `https://smithery.ai/new` → hubungkan repo GitHub `maskchanel14-source/po-pilot-mcp` → klik **Deploy** *(atau jika Anda sudah menyalakan endpoint HTTP publik di Render/Koyeb/MCPize, jalankan CLI `@smithery/cli@4.11.1`: `npm install -g @smithery/cli && smithery login && smithery publish https://domain-anda.com/mcp`)*.
 
 ---
 
-## Langkah 5: Deploy Endpoint HTTP untuk Workflow n8n (Cloud Gratis / VPS / Klien $950)
+## Langkah 5: Deploy Endpoint HTTP untuk 3 Workflow n8n (Cloud Gratis / VPS / Klien $1.450)
 
-Kedua template n8n di `sales-bundle/n8n-templates/` memanggil endpoint Streamable HTTP `POST /mcp`. Anda punya **2 opsi gratis/murah**:
+Ketiga template n8n di `sales-bundle/n8n-templates/` (`#01` Monday PO + POS Transfer CSV, `#02` Webhook 3-Way Match, dan `#03` IMAP Email PDF Invoice → Auto 3-Way Match + QuickBooks/Xero CSV) memanggil endpoint Streamable HTTP `POST /mcp`. Anda punya **2 opsi gratis/murah**:
 
 ### Opsi A — Satu Perintah Docker Compose (Lokal / VPS Klien)
 File `docker-compose.yml` di repo ini langsung menyalakan `po-pilot-mcp` (`:8080`) + `n8n` (`:5678`) dalam satu jaringan internal yang sudah saling tersambung:
@@ -111,7 +106,7 @@ Jika memakai **n8n Cloud** atau ingin endpoint publik `https://...`:
 
 ---
 
-## Langkah 6: Bungkus ZIP Produk Digital $49 untuk Polar.sh / Lemon Squeezy / Gumroad
+## Langkah 6: Bungkus ZIP Produk Digital ($49 Early-Bird → $99 Solo / $249 Agency) untuk Polar.sh / Lemon Squeezy / Gumroad
 
 Jalankan perintah ini di root repo untuk membuat file ZIP siap upload ke Polar.sh, Lemon Squeezy, dan Gumroad:
 
