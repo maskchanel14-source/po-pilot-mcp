@@ -15,7 +15,7 @@ Saat ini seluruh kode berada di working branch Arena (`arena/0a7ca7bf-po-pilot-m
 
 ---
 
-## Langkah 2: Publish ke `npm` (Agar User Bisa `npx -y po-pilot-mcp`)
+## Langkah 2: Publish ke `npm` (Agar User Bisa `npx -y po-pilot-mcp@1.0.0`)
 
 Ada **2 cara** (pilih salah satu):
 

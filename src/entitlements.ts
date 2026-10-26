@@ -141,30 +141,35 @@ async function validatePolarLicenseKey(
   }
 }
 
+function stripEnvQuotes(val: string): string {
+  const trimmed = val.trim();
+  return trimmed.replace(/^(['"])(.*)\1$/, "$2").trim();
+}
+
 export async function resolveEntitlement(options?: {
   licenseKey?: string;
   polarOrganizationId?: string;
   publicKeySpkiB64?: string;
   polarApiBaseUrl?: string;
 }): Promise<EntitlementResult> {
-  const rawKey = (
+  const rawKey = stripEnvQuotes(
     options?.licenseKey ??
-    process.env.PO_PILOT_LICENSE_KEY ??
-    process.env.PO_PILOT_SERVER_LICENSE_KEY ??
-    ""
-  ).trim();
+      process.env.PO_PILOT_LICENSE_KEY ??
+      process.env.PO_PILOT_SERVER_LICENSE_KEY ??
+      ""
+  );
 
   if (!rawKey) {
     return { unlocked: false, tier: "free_local", source: "none", reason: "no_license_key" };
   }
 
-  const publicKeySpkiB64 = (
+  const publicKeySpkiB64 = stripEnvQuotes(
     options?.publicKeySpkiB64 ??
-    process.env.PO_PILOT_PUBLIC_KEY_SPKI_B64 ??
-    DEFAULT_PUBLIC_KEY_SPKI_B64
-  ).trim();
-  const polarOrgEnv = (options?.polarOrganizationId ?? process.env.POLAR_ORGANIZATION_ID ?? "").trim();
-  const polarBase = (options?.polarApiBaseUrl ?? process.env.POLAR_API_BASE_URL ?? "https://api.polar.sh").trim();
+      process.env.PO_PILOT_PUBLIC_KEY_SPKI_B64 ??
+      DEFAULT_PUBLIC_KEY_SPKI_B64
+  );
+  const polarOrgEnv = stripEnvQuotes(options?.polarOrganizationId ?? process.env.POLAR_ORGANIZATION_ID ?? "");
+  const polarBase = stripEnvQuotes(options?.polarApiBaseUrl ?? process.env.POLAR_API_BASE_URL ?? "https://api.polar.sh");
 
   const cacheKey = `${rawKey}|${polarOrgEnv}|${publicKeySpkiB64}|${polarBase}`;
   const cached = entitlementCache.get(cacheKey);

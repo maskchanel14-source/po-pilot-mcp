@@ -55,6 +55,10 @@ function formatXeroUnitAmount(val: number): string {
   return Number(val.toFixed(4)).toString();
 }
 
+function roundCents(val: number): number {
+  return Math.round((val + 1e-12) * 100) / 100;
+}
+
 function buildQuickBooksBillCsv(params: {
   billNo: string;
   vendor: string;
@@ -213,28 +217,15 @@ export function runThreeWayMatch(input: {
 
   const discrepancies: ThreeWayDiscrepancy[] = [];
   const verifiedBillLines: VerifiedBillLine[] = [];
-  const extraFees = input.invoice_extra_fees_usd ?? 0;
-  const freightCap = input.agreed_freight_cap_usd ?? Infinity;
+  const extraFees = roundCents(input.invoice_extra_fees_usd ?? 0);
 
-  let totalBilled = extraFees;
-  const verifiedFreight = Number(Math.min(extraFees, freightCap).toFixed(2));
+  let totalBilled = 0;
   let verifiedPayable = 0;
-
-  if (extraFees > freightCap) {
-    const diff = Number((extraFees - (input.agreed_freight_cap_usd ?? 0)).toFixed(2));
-    discrepancies.push({
-      sku: "FREIGHT_AND_FEES",
-      issue_type: "FREIGHT_CAP_EXCEEDED",
-      po_expected: `$${(input.agreed_freight_cap_usd ?? 0).toFixed(2)} cap`,
-      warehouse_received: "N/A",
-      vendor_billed: `$${extraFees.toFixed(2)}`,
-      overcharge_usd: diff
-    });
-  }
+  let totalPayableMerchandiseQty = 0;
 
   for (const inv of invMap.values()) {
-    const lineBilled = inv.total_billed;
-    totalBilled += lineBilled;
+    const lineBilled = roundCents(inv.total_billed);
+    totalBilled = roundCents(totalBilled + lineBilled);
 
     const po = poMap.get(inv.key);
     if (!po) {
@@ -244,7 +235,7 @@ export function runThreeWayMatch(input: {
         po_expected: "Not on PO",
         warehouse_received: "0 units",
         vendor_billed: `${inv.billed_qty} @ $${inv.billed_unit_cost_usd.toFixed(2)}`,
-        overcharge_usd: Number(lineBilled.toFixed(2))
+        overcharge_usd: lineBilled
       });
       continue;
     }
@@ -255,11 +246,12 @@ export function runThreeWayMatch(input: {
     const verifiedReceivedGoodQty = hasReceivingLog ? (rec?.received_good_qty ?? 0) : po.ordered_qty;
     const payableQty = Math.min(po.ordered_qty, verifiedReceivedGoodQty, inv.billed_qty);
     const payableUnitCost = Math.min(po.unit_cost_usd, inv.billed_unit_cost_usd);
-    const verifiedLineTotal = Number((payableQty * payableUnitCost).toFixed(2));
-    verifiedPayable += verifiedLineTotal;
+    const verifiedLineTotal = roundCents(payableQty * payableUnitCost);
+    verifiedPayable = roundCents(verifiedPayable + verifiedLineTotal);
+    totalPayableMerchandiseQty += payableQty;
 
     if (payableQty > 0 && verifiedLineTotal >= 0) {
-      const cleanDesc = `${po.sku} - ${po.title ?? po.sku} (${payableQty} good units @ $${payableUnitCost.toFixed(2)} | PO ${input.po_number})`;
+      const cleanDesc = `${po.sku} - ${po.title ?? po.sku} (${payableQty} good units @ $${formatXeroUnitAmount(payableUnitCost)} | PO ${input.po_number})`;
       verifiedBillLines.push({
         sku: po.sku,
         description: cleanDesc,
@@ -270,21 +262,23 @@ export function runThreeWayMatch(input: {
       });
     }
 
-    if (inv.billed_qty > payableQty) {
-      const qtyDiff = inv.billed_qty - payableQty;
+    const lineOvercharge = roundCents(Math.max(0, lineBilled - verifiedLineTotal));
+    const hasShortShip = inv.billed_qty > payableQty;
+    const priceDiff = inv.billed_unit_cost_usd - po.unit_cost_usd;
+    const rawPriceOvercharge = priceDiff > 1e-9 ? roundCents(priceDiff * inv.billed_qty) : 0;
+    const hasPriceOvercharge = priceDiff > 1e-9 && rawPriceOvercharge >= 0.01;
+
+    if (hasShortShip && hasPriceOvercharge) {
+      const priceOverchargeUsd = Math.min(lineOvercharge, rawPriceOvercharge);
+      const shortShipOverchargeUsd = roundCents(Math.max(0, lineOvercharge - priceOverchargeUsd));
       discrepancies.push({
         sku: inv.sku,
         issue_type: "SHORT_SHIP_BILLED",
         po_expected: `${po.ordered_qty} ordered`,
         warehouse_received: `${verifiedReceivedGoodQty} good (${rec?.damaged_qty ?? 0} damaged)`,
         vendor_billed: `${inv.billed_qty} billed`,
-        overcharge_usd: Number((qtyDiff * payableUnitCost).toFixed(2))
+        overcharge_usd: shortShipOverchargeUsd
       });
-    }
-
-    const priceDiff = inv.billed_unit_cost_usd - po.unit_cost_usd;
-    const priceOverchargeUsd = Number((priceDiff * inv.billed_qty).toFixed(2));
-    if (priceDiff > 1e-9 && priceOverchargeUsd >= 0.01) {
       discrepancies.push({
         sku: inv.sku,
         issue_type: "UNIT_PRICE_OVERCHARGE",
@@ -293,11 +287,49 @@ export function runThreeWayMatch(input: {
         vendor_billed: `$${formatXeroUnitAmount(inv.billed_unit_cost_usd)}/unit on ${inv.billed_qty} units`,
         overcharge_usd: priceOverchargeUsd
       });
+    } else if (hasShortShip) {
+      discrepancies.push({
+        sku: inv.sku,
+        issue_type: "SHORT_SHIP_BILLED",
+        po_expected: `${po.ordered_qty} ordered`,
+        warehouse_received: `${verifiedReceivedGoodQty} good (${rec?.damaged_qty ?? 0} damaged)`,
+        vendor_billed: `${inv.billed_qty} billed`,
+        overcharge_usd: lineOvercharge
+      });
+    } else if (hasPriceOvercharge) {
+      discrepancies.push({
+        sku: inv.sku,
+        issue_type: "UNIT_PRICE_OVERCHARGE",
+        po_expected: `$${formatXeroUnitAmount(po.unit_cost_usd)}/unit`,
+        warehouse_received: `${payableQty} good units`,
+        vendor_billed: `$${formatXeroUnitAmount(inv.billed_unit_cost_usd)}/unit on ${inv.billed_qty} units`,
+        overcharge_usd: lineOvercharge
+      });
     }
   }
 
+  totalBilled = roundCents(totalBilled + extraFees);
+  const noGoodUnitsAccepted = poMap.size > 0 && totalPayableMerchandiseQty === 0;
+  const effectiveFreightCap = noGoodUnitsAccepted ? 0 : (input.agreed_freight_cap_usd ?? Infinity);
+  const verifiedFreight = roundCents(Math.min(extraFees, effectiveFreightCap));
+
+  if (extraFees > effectiveFreightCap) {
+    const capNumber = Number.isFinite(effectiveFreightCap) ? effectiveFreightCap : 0;
+    const diff = roundCents(extraFees - capNumber);
+    discrepancies.unshift({
+      sku: "FREIGHT_AND_FEES",
+      issue_type: "FREIGHT_CAP_EXCEEDED",
+      po_expected: noGoodUnitsAccepted
+        ? "$0.00 (0 good PO units accepted)"
+        : `$${capNumber.toFixed(2)} cap`,
+      warehouse_received: noGoodUnitsAccepted ? "0 good units" : "N/A",
+      vendor_billed: `$${extraFees.toFixed(2)}`,
+      overcharge_usd: diff
+    });
+  }
+
   if (verifiedFreight > 0) {
-    verifiedPayable += verifiedFreight;
+    verifiedPayable = roundCents(verifiedPayable + verifiedFreight);
     verifiedBillLines.push({
       sku: "FREIGHT",
       description: `Approved Freight & Handling (PO ${input.po_number})`,
@@ -308,10 +340,8 @@ export function runThreeWayMatch(input: {
     });
   }
 
-  const totalPo = Number([...poMap.values()].reduce((s, l) => s + l.total_cost, 0).toFixed(2));
-  totalBilled = Number(totalBilled.toFixed(2));
-  verifiedPayable = Number(verifiedPayable.toFixed(2));
-  const recovered = Number(Math.max(0, totalBilled - verifiedPayable).toFixed(2));
+  const totalPo = roundCents([...poMap.values()].reduce((s, l) => s + l.total_cost, 0));
+  const recovered = roundCents(Math.max(0, totalBilled - verifiedPayable));
 
   const now = new Date();
   const invoiceDate = resolveIsoDate(input.invoice_date, now);

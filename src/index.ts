@@ -95,15 +95,23 @@ async function startHttpServer(port: number): Promise<void> {
         const chunks: Buffer[] = [];
         let totalBytes = 0;
         const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB safety cap
+        let bodyTooLarge = false;
         for await (const chunk of req) {
           const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
           totalBytes += buf.length;
           if (totalBytes > MAX_BODY_BYTES) {
-            res.writeHead(413, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Payload too large (max 10MB)" }));
-            return;
+            bodyTooLarge = true;
+            req.pause();
+            break;
           }
           chunks.push(buf);
+        }
+        if (bodyTooLarge) {
+          res.writeHead(413, { "Content-Type": "application/json", Connection: "close" });
+          res.end(JSON.stringify({ error: "Payload too large (max 10MB)" }), () => {
+            req.destroy();
+          });
+          return;
         }
         const rawBody = Buffer.concat(chunks).toString("utf8");
         let parsedBody: unknown;
@@ -160,8 +168,10 @@ async function main(): Promise<void> {
   const useHttp =
     args.includes("--http") || process.env.TRANSPORT === "http" || process.env.MCP_TRANSPORT === "http";
   if (useHttp) {
-    const parsedPort = Number(process.env.PORT);
-    const port = Number.isInteger(parsedPort) && parsedPort >= 1 && parsedPort <= 65535 ? parsedPort : 8080;
+    const portFlagIdx = args.indexOf("--port");
+    const cliPort = portFlagIdx >= 0 && args[portFlagIdx + 1] ? Number(args[portFlagIdx + 1]) : NaN;
+    const rawPort = Number.isInteger(cliPort) ? cliPort : Number(process.env.PORT);
+    const port = Number.isInteger(rawPort) && rawPort >= 1 && rawPort <= 65535 ? rawPort : 8080;
     await startHttpServer(port);
     return;
   }

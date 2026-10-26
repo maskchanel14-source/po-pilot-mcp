@@ -183,28 +183,63 @@ export function parseNumber(val: string, fallback: number): number {
 export function mapInventoryCsvToSignals(rawCsv: string, defaultWindowDays = 30): SkuSignal[] {
   const rows = parseCsv(rawCsv);
   const signals: SkuSignal[] = [];
+  const parentByHandle = new Map<string, { title?: string; vendor?: string; status?: string }>();
 
   for (const row of rows) {
+    const handle = pickField(row, ["Handle", "handle"]).trim();
+    const handleKey = handle.toLowerCase();
+    const rawTitle = pickField(row, ["Title", "Product Title", "Name", "Product"]).trim();
+    const rawVendor = pickField(row, ["Vendor", "Supplier", "Supplier Name"]).trim();
+    const rawStatus = pickField(row, ["Status", "Product Status", "status"]).trim();
+
+    let parent: { title?: string; vendor?: string; status?: string } | undefined;
+    if (handleKey) {
+      parent = parentByHandle.get(handleKey) ?? {};
+      if (rawTitle && !parent.title) parent.title = rawTitle;
+      if (rawVendor && !parent.vendor) parent.vendor = rawVendor;
+      if (rawStatus && !parent.status) parent.status = rawStatus;
+      parentByHandle.set(handleKey, parent);
+    }
+
+    const effectiveStatus = (rawStatus || parent?.status || "").toLowerCase();
+    if (effectiveStatus === "archived" || effectiveStatus === "draft") {
+      continue;
+    }
+
     const sku = pickField(row, ["Variant SKU", "SKU", "sku"]).trim();
     if (!sku) continue;
+
     const barcode = pickField(row, ["Variant Barcode", "Barcode", "UPC", "EAN", "GTIN", "barcode"]).trim() || undefined;
-    const title = pickField(row, ["Title", "Product Title", "Name", "Product"]).trim() || sku;
-    const vendor = pickField(row, ["Vendor", "Supplier", "Supplier Name"]).trim() || "Unassigned Vendor";
+    const baseTitle = rawTitle || parent?.title || "";
+    const optionValues = [
+      pickField(row, ["Option1 Value", "Variant Title"]),
+      pickField(row, ["Option2 Value"]),
+      pickField(row, ["Option3 Value"])
+    ]
+      .map((v) => v.trim())
+      .filter((v) => v.length > 0 && v.toLowerCase() !== "default title");
+    const optionSuffix = optionValues.join(" / ");
+    const title =
+      baseTitle && optionSuffix && !baseTitle.toLowerCase().includes(optionSuffix.toLowerCase())
+        ? `${baseTitle} - ${optionSuffix}`
+        : baseTitle || optionSuffix || sku;
+
+    const vendor = rawVendor || parent?.vendor || "Unassigned Vendor";
     const onHand = Math.max(
       -100000,
       Math.min(10000000, Math.round(parseNumber(pickField(row, ["Variant Inventory Qty", "On Hand", "Available", "on_hand"]), 0)))
     );
-    const committed = Math.max(0, Math.round(parseNumber(pickField(row, ["Committed", "committed"]), 0)));
-    const onOrder = Math.max(0, Math.round(parseNumber(pickField(row, ["Incoming", "On Order", "on_order"]), 0)));
-    const backorders = Math.max(0, Math.round(parseNumber(pickField(row, ["Backorders", "backorders"]), 0)));
-    const unitsSold = Math.max(0, parseNumber(pickField(row, ["Units Sold", "Net Quantity", "Sold", "units_sold_window"]), 0));
+    const committed = Math.max(0, Math.min(10000000, Math.round(parseNumber(pickField(row, ["Committed", "committed"]), 0))));
+    const onOrder = Math.max(0, Math.min(10000000, Math.round(parseNumber(pickField(row, ["Incoming", "On Order", "on_order"]), 0))));
+    const backorders = Math.max(0, Math.min(10000000, Math.round(parseNumber(pickField(row, ["Backorders", "backorders"]), 0))));
+    const unitsSold = Math.max(0, Math.min(10000000, parseNumber(pickField(row, ["Units Sold", "Net Quantity", "Sold", "units_sold_window"]), 0)));
     const windowDays = Math.max(1, Math.min(365, Math.round(parseNumber(pickField(row, ["Window Days", "window_days"]), defaultWindowDays))));
     const stockoutDays = Math.max(0, Math.round(parseNumber(pickField(row, ["Stockout Days", "stockout_days"]), 0)));
-    const unitCost = Math.max(0, parseNumber(pickField(row, ["Cost per item", "Unit Cost", "Cost", "unit_cost_usd"]), 0));
-    const retailPrice = Math.max(0, parseNumber(pickField(row, ["Variant Price", "Price", "Retail Price", "retail_price_usd"]), unitCost * 2.5));
+    const unitCost = Math.max(0, Math.min(1000000, parseNumber(pickField(row, ["Cost per item", "Unit Cost", "Cost", "unit_cost_usd"]), 0)));
+    const retailPrice = Math.max(0, Math.min(1000000, parseNumber(pickField(row, ["Variant Price", "Price", "Retail Price", "retail_price_usd"]), unitCost * 2.5)));
     const leadTime = Math.max(1, Math.min(365, parseNumber(pickField(row, ["Lead Time", "Lead Time Days", "lead_time_days"]), 14)));
-    const casePack = Math.max(1, Math.round(parseNumber(pickField(row, ["Case Pack", "Pack Size", "case_pack"]), 1)));
-    const skuMoq = Math.max(1, Math.round(parseNumber(pickField(row, ["MOQ", "SKU MOQ", "sku_moq"]), 1)));
+    const casePack = Math.max(1, Math.min(100000, Math.round(parseNumber(pickField(row, ["Case Pack", "Pack Size", "case_pack"]), 1))));
+    const skuMoq = Math.max(1, Math.min(1000000, Math.round(parseNumber(pickField(row, ["MOQ", "SKU MOQ", "sku_moq"]), 1))));
 
     signals.push({
       sku,

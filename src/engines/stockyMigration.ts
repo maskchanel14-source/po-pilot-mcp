@@ -118,7 +118,7 @@ export function migrateStockyPoCsv(rawCsv: string): {
     const minUsd = poUsd.length > 0 ? Math.floor(Math.min(...poUsd) / 50) * 50 : 0;
 
     const skus = [...skuStats.values()].map((st) => {
-      const pack = st.quantities.length > 0 ? st.quantities.reduce((acc, q) => gcd(acc, q)) : 1;
+      const pack = st.quantities.length >= 2 ? st.quantities.reduce((acc, q) => gcd(acc, q)) : 1;
       return {
         sku: st.displaySku,
         title: st.title,

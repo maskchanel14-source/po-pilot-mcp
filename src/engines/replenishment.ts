@@ -17,8 +17,17 @@ export interface ReplenishmentSummary {
   items: ReplenishmentItemResult[];
 }
 
-export function deduplicateSignals(rawSignals: SkuSignal[]): SkuSignal[] {
-  const merged = new Map<string, SkuSignal>();
+export interface MergedSkuSignal extends SkuSignal {
+  _mergedDailyVelocity?: number;
+}
+
+function singleLocationVelocity(s: SkuSignal): number {
+  const activeDays = Math.max(1, s.window_days - Math.min(s.stockout_days, s.window_days - 1));
+  return s.units_sold_window / activeDays;
+}
+
+export function deduplicateSignals(rawSignals: SkuSignal[]): MergedSkuSignal[] {
+  const merged = new Map<string, MergedSkuSignal>();
   for (const s of rawSignals) {
     const key = s.sku.trim().toUpperCase();
     if (!key) continue;
@@ -33,6 +42,13 @@ export function deduplicateSignals(rawSignals: SkuSignal[]): SkuSignal[] {
     } else {
       const windowDays = Math.max(existing.window_days, s.window_days);
       const barcode = existing.barcode?.trim() || s.barcode?.trim();
+      const velExisting = existing._mergedDailyVelocity ?? singleLocationVelocity(existing);
+      const velCurrent = singleLocationVelocity(s);
+      const combinedDailyStdDev =
+        existing.daily_demand_std_dev !== undefined && s.daily_demand_std_dev !== undefined
+          ? Math.hypot(existing.daily_demand_std_dev, s.daily_demand_std_dev)
+          : existing.daily_demand_std_dev ?? s.daily_demand_std_dev;
+
       merged.set(key, {
         ...existing,
         ...(barcode ? { barcode } : {}),
@@ -44,13 +60,15 @@ export function deduplicateSignals(rawSignals: SkuSignal[]): SkuSignal[] {
         backorders: existing.backorders + s.backorders,
         units_sold_window: existing.units_sold_window + s.units_sold_window,
         window_days: windowDays,
-        stockout_days: Math.min(windowDays - 1, Math.max(existing.stockout_days, s.stockout_days)),
+        stockout_days: Math.min(windowDays - 1, Math.min(existing.stockout_days, s.stockout_days)),
+        daily_demand_std_dev: combinedDailyStdDev,
         unit_cost_usd: existing.unit_cost_usd > 0 ? existing.unit_cost_usd : s.unit_cost_usd,
         retail_price_usd: existing.retail_price_usd > 0 ? existing.retail_price_usd : s.retail_price_usd,
         lead_time_days: Math.max(existing.lead_time_days, s.lead_time_days),
         lead_time_std_dev_days: Math.max(existing.lead_time_std_dev_days, s.lead_time_std_dev_days),
         case_pack: Math.max(existing.case_pack, s.case_pack),
-        sku_moq: Math.max(existing.sku_moq, s.sku_moq)
+        sku_moq: Math.max(existing.sku_moq, s.sku_moq),
+        _mergedDailyVelocity: velExisting + velCurrent
       });
     }
   }
@@ -92,7 +110,8 @@ export function computeReplenishmentPlan(
 
   const items: ReplenishmentItemResult[] = signals.map((s) => {
     const activeDays = Math.max(1, s.window_days - Math.min(s.stockout_days, s.window_days - 1));
-    const velocity = Number((s.units_sold_window / activeDays).toFixed(3));
+    const rawVelocity = s._mergedDailyVelocity ?? s.units_sold_window / activeDays;
+    const velocity = Number(rawVelocity.toFixed(3));
     const sigmaD = s.daily_demand_std_dev ?? velocity * 0.35;
     const sigmaLt = s.lead_time_std_dev_days ?? 2;
 
