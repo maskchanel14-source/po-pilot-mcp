@@ -7,7 +7,7 @@
   "transports": ["stdio", "streamable-http"],
   "authentication": {
     "required": false,
-    "optional_env": ["SHOPIFY_STORE_DOMAIN", "SHOPIFY_ACCESS_TOKEN"]
+    "optional_env": ["PO_PILOT_LICENSE_KEY", "SHOPIFY_STORE_DOMAIN", "SHOPIFY_ACCESS_TOKEN"]
   },
   "tools": [
     "calculate_replenishment_plan",

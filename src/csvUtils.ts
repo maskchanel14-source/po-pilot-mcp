@@ -96,7 +96,7 @@ export function toShopifyDraftPoCsv(
   return [header.join(","), ...body].join("\n");
 }
 
-function pickField(row: Record<string, string>, aliases: string[]): string {
+export function pickField(row: Record<string, string>, aliases: string[]): string {
   const lowerMap = new Map<string, string>();
   for (const [k, v] of Object.entries(row)) {
     lowerMap.set(k.toLowerCase().replace(/[^a-z0-9]/g, ""), v);
@@ -108,9 +108,10 @@ function pickField(row: Record<string, string>, aliases: string[]): string {
   return "";
 }
 
-function parseNumber(val: string, fallback: number): number {
+export function parseNumber(val: string, fallback: number): number {
   if (!val) return fallback;
   const cleaned = val.replace(/[$,%\s]/g, "");
+  if (!cleaned) return fallback;
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : fallback;
 }
@@ -123,19 +124,23 @@ export function mapInventoryCsvToSignals(rawCsv: string, defaultWindowDays = 30)
   const signals: SkuSignal[] = [];
 
   for (const row of rows) {
-    const sku = pickField(row, ["Variant SKU", "SKU", "sku"]);
+    const sku = pickField(row, ["Variant SKU", "SKU", "sku"]).trim();
     if (!sku) continue;
-    const title = pickField(row, ["Title", "Product Title", "Name", "Product"]) || sku;
-    const vendor = pickField(row, ["Vendor", "Supplier", "Supplier Name"]) || "Unassigned Vendor";
-    const onHand = Math.round(parseNumber(pickField(row, ["Variant Inventory Qty", "On Hand", "Available", "on_hand"]), 0));
-    const committed = Math.round(parseNumber(pickField(row, ["Committed", "committed"]), 0));
-    const onOrder = Math.round(parseNumber(pickField(row, ["Incoming", "On Order", "on_order"]), 0));
-    const unitsSold = parseNumber(pickField(row, ["Units Sold", "Net Quantity", "Sold", "units_sold_window"]), 0);
-    const windowDays = Math.max(1, Math.round(parseNumber(pickField(row, ["Window Days", "window_days"]), defaultWindowDays)));
+    const title = pickField(row, ["Title", "Product Title", "Name", "Product"]).trim() || sku;
+    const vendor = pickField(row, ["Vendor", "Supplier", "Supplier Name"]).trim() || "Unassigned Vendor";
+    const onHand = Math.max(
+      -100000,
+      Math.min(10000000, Math.round(parseNumber(pickField(row, ["Variant Inventory Qty", "On Hand", "Available", "on_hand"]), 0)))
+    );
+    const committed = Math.max(0, Math.round(parseNumber(pickField(row, ["Committed", "committed"]), 0)));
+    const onOrder = Math.max(0, Math.round(parseNumber(pickField(row, ["Incoming", "On Order", "on_order"]), 0)));
+    const backorders = Math.max(0, Math.round(parseNumber(pickField(row, ["Backorders", "backorders"]), 0)));
+    const unitsSold = Math.max(0, parseNumber(pickField(row, ["Units Sold", "Net Quantity", "Sold", "units_sold_window"]), 0));
+    const windowDays = Math.max(1, Math.min(365, Math.round(parseNumber(pickField(row, ["Window Days", "window_days"]), defaultWindowDays))));
     const stockoutDays = Math.max(0, Math.round(parseNumber(pickField(row, ["Stockout Days", "stockout_days"]), 0)));
-    const unitCost = parseNumber(pickField(row, ["Cost per item", "Unit Cost", "Cost", "unit_cost_usd"]), 0);
-    const retailPrice = parseNumber(pickField(row, ["Variant Price", "Price", "Retail Price", "retail_price_usd"]), unitCost * 2.5);
-    const leadTime = Math.max(1, parseNumber(pickField(row, ["Lead Time", "Lead Time Days", "lead_time_days"]), 14));
+    const unitCost = Math.max(0, parseNumber(pickField(row, ["Cost per item", "Unit Cost", "Cost", "unit_cost_usd"]), 0));
+    const retailPrice = Math.max(0, parseNumber(pickField(row, ["Variant Price", "Price", "Retail Price", "retail_price_usd"]), unitCost * 2.5));
+    const leadTime = Math.max(1, Math.min(365, parseNumber(pickField(row, ["Lead Time", "Lead Time Days", "lead_time_days"]), 14)));
     const casePack = Math.max(1, Math.round(parseNumber(pickField(row, ["Case Pack", "Pack Size", "case_pack"]), 1)));
     const skuMoq = Math.max(1, Math.round(parseNumber(pickField(row, ["MOQ", "SKU MOQ", "sku_moq"]), 1)));
 
@@ -146,7 +151,7 @@ export function mapInventoryCsvToSignals(rawCsv: string, defaultWindowDays = 30)
       on_hand: onHand,
       committed,
       on_order: onOrder,
-      backorders: 0,
+      backorders,
       units_sold_window: unitsSold,
       window_days: windowDays,
       stockout_days: Math.min(stockoutDays, windowDays - 1),

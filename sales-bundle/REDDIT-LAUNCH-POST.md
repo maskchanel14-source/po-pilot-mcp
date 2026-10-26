@@ -43,6 +43,6 @@ Quick ops question for wholesalers/flippers doing 3+ rehabs or holding wholesale
 
 We kept seeing contractors and material suppliers bill full carton quantities when 10–15% arrived cracked at the job site, or quietly bump unit prices by 6–8% vs the original quote sheet.
 
-I wired up a small open-source 3-way match + MOQ Purchase Order MCP tool (`po-pilot-mcp`, MIT license on GitHub) that cross-checks original PO unit prices vs on-sitegood received counts vs the vendor invoice inside Claude, then writes the exact credit/debit memo before releasing final draw payment.
+I wired up a small open-source 3-way match + MOQ Purchase Order MCP tool (`po-pilot-mcp`, MIT license on GitHub) that cross-checks original PO unit prices vs on-site good received counts vs the vendor invoice inside Claude, then writes the exact credit/debit memo before releasing final draw payment.
 
 Curious if anyone else here automates material POs / draw audits in n8n or if everyone still tracks SKU quotes in Google Sheets?

@@ -36,7 +36,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json;\nconst textPayload = raw?.result?.content?.[0]?.text || '{}';\nconst audit = JSON.parse(textPayload);\nreturn [{ json: audit }];"
+        "jsCode": "const raw = $input.first().json;\nlet envelope = raw;\nif (typeof raw?.data === 'string' && raw.data.includes('data:')) {\n  const dataLine = raw.data.split(/\\r?\\n/).find((l) => l.startsWith('data:'));\n  if (dataLine) envelope = JSON.parse(dataLine.slice(5).trim());\n}\nconst textPayload = envelope?.result?.content?.[0]?.text;\nif (!textPayload) {\n  throw new Error('Unexpected MCP response payload: ' + JSON.stringify(raw));\n}\nconst audit = JSON.parse(textPayload);\nif (!audit.ok) {\n  throw new Error(audit.message || audit.error || 'PO Pilot 3-Way Match returned an error');\n}\nreturn [{ json: audit }];"
       },
       "id": "c2f30001-0003-4000-8000-000000000003",
       "name": "Unpack Audit Verdict",

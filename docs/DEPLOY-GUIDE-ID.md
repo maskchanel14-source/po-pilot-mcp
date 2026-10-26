@@ -44,7 +44,7 @@ npm publish --access public
 
 ## Langkah 3: Deploy & Monetisasi ke MCPize Cloud (Free + Pro $19/bln + USDC `x402`)
 
-File `mcpize.yaml` sudah terkonfigurasi dengan tier **Free Sandbox (15 req/bln)**, **Pro ($19/bln — 300 req/bln)**, dan **Agency ($59/bln — 2.500 req/bln)**, sementara mode lokal mengunci lembut di **25 SKU/panggilan** (kecuali memiliki `PO_PILOT_LICENSE_KEY` dari Polar.sh $49 atau `scripts/mint-license.mjs`).
+File `mcpize.yaml` sudah tervalidasi ketat terhadap skema Zod resmi `mcpize@1.2.2`. Setelah `mcpize deploy --yes`, atur tier langganan di **MCPize Developer Dashboard → Monetization**: **Free Sandbox (15 req/bln)**, **Pro ($19/bln — 300 req/bln)**, dan **Agency ($59/bln — 2.500 req/bln)**, serta isi secret `PO_PILOT_SERVER_LICENSE_KEY` agar pelanggan cloud Pro/Agency Anda bebas dari batas lokal 25 SKU/panggilan.
 
 ```bash
 # 1. Install CLI resmi MCPize
@@ -71,12 +71,7 @@ Karena kita sudah menyertakan **`Dockerfile`** multi-stage + `glama.json` + `smi
 3. Setelah terindeks, klik **"Claim Server"** dengan login GitHub `maskchanel14-source` (cocok dengan field `"maintainers"` di `glama.json`) agar mendapat lencana verified & skor **A**.
 
 ### B. Smithery (`smithery.ai`)
-```bash
-npm install -g @smithery/cli
-smithery login
-smithery deploy
-```
-*(Atau buka `https://smithery.ai/new` → pilih repo `maskchanel14-source/po-pilot-mcp` → Deploy).*
+Buka `https://smithery.ai/new` → hubungkan repo GitHub `maskchanel14-source/po-pilot-mcp` → klik **Deploy** *(atau jika Anda sudah menyalakan endpoint HTTP publik di Render/Koyeb/MCPize, jalankan CLI `@smithery/cli@4.11.1`: `npm install -g @smithery/cli && smithery login && smithery publish https://domain-anda.com/mcp`)*.
 
 ---
 

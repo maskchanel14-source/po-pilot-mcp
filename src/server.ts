@@ -26,7 +26,8 @@ import {
   ServiceLevelSchema,
   SkuSignalSchema,
   SupplierRuleSchema,
-  type SkuSignal
+  type SkuSignal,
+  type SupplierRule
 } from "./types.js";
 
 export const SERVER_NAME = "po-pilot-mcp";
@@ -90,6 +91,31 @@ class LiveShopifyEntitlementError extends Error {
   }
 }
 
+function applySupplierRuleOverrides(signals: SkuSignal[], rules: SupplierRule[]): SkuSignal[] {
+  if (rules.length === 0) return signals;
+  const leadByVendor = new Map<string, number>();
+  for (const r of rules) {
+    if (typeof r.lead_time_days === "number" && r.lead_time_days > 0) {
+      leadByVendor.set(r.vendor.trim().toLowerCase(), r.lead_time_days);
+    }
+  }
+  if (leadByVendor.size === 0) return signals;
+
+  return signals.map((s) => {
+    const overrideLead = leadByVendor.get(s.vendor.trim().toLowerCase());
+    return overrideLead !== undefined ? { ...s, lead_time_days: overrideLead } : s;
+  });
+}
+
+function estimateDaysOfCoverRatio(s: SkuSignal): number {
+  const activeDays = Math.max(1, s.window_days - Math.min(s.stockout_days, s.window_days - 1));
+  const dailyVel = s.units_sold_window / activeDays;
+  const invPos = s.on_hand + s.on_order - s.committed - s.backorders;
+  if (dailyVel <= 0) return Number.POSITIVE_INFINITY;
+  // Normalize by lead time so SKUs closest to stocking out before supplier arrival surface first
+  return (invPos / dailyVel) - s.lead_time_days;
+}
+
 async function resolveSkuInputs(
   params: {
     skus?: SkuSignal[];
@@ -98,7 +124,8 @@ async function resolveSkuInputs(
     demo_mode?: boolean;
     window_days?: number;
   },
-  unlocked: boolean
+  unlocked: boolean,
+  supplierRules: SupplierRule[] = []
 ): Promise<{
   source: string;
   signals: SkuSignal[];
@@ -145,21 +172,28 @@ async function resolveSkuInputs(
     }
   }
 
-  if (!unlocked && rawSignals.length > FREE_LOCAL_MAX_SKUS) {
+  const withRuleLeads = applySupplierRuleOverrides(rawSignals, supplierRules);
+
+  if (!unlocked && withRuleLeads.length > FREE_LOCAL_MAX_SKUS) {
+    // Surface the 25 most urgent stockout-risk SKUs first so Free Sandbox users immediately see real reorder insights
+    const prioritized = [...withRuleLeads]
+      .sort((a, b) => estimateDaysOfCoverRatio(a) - estimateDaysOfCoverRatio(b))
+      .slice(0, FREE_LOCAL_MAX_SKUS);
+
     return {
       source,
-      signals: rawSignals.slice(0, FREE_LOCAL_MAX_SKUS),
+      signals: prioritized,
       truncationMeta: {
         truncated_by_free_tier: true,
-        skus_received: rawSignals.length,
+        skus_received: withRuleLeads.length,
         skus_processed: FREE_LOCAL_MAX_SKUS,
-        skus_omitted: rawSignals.length - FREE_LOCAL_MAX_SKUS,
+        skus_omitted: withRuleLeads.length - FREE_LOCAL_MAX_SKUS,
         upgrade_notice: UPGRADE_NOTICE
       }
     };
   }
 
-  return { source, signals: rawSignals, truncationMeta: {} };
+  return { source, signals: withRuleLeads, truncationMeta: {} };
 }
 
 export function createPoPilotServer(): McpServer {
@@ -236,7 +270,7 @@ export function createPoPilotServer(): McpServer {
       inputSchema: {
         skus: z.array(SkuSignalSchema).max(2500).optional().describe("Structured SKU inventory + velocity rows."),
         inventory_csv: z.string().max(2_000_000).optional().describe("Raw Shopify Products/Inventory CSV text."),
-        supplier_rules: z.array(SupplierRuleSchema).max(500).optional().describe("Per-vendor MOQ, minimum USD spend, payment terms, email, and ship-to location rules."),
+        supplier_rules: z.array(SupplierRuleSchema).max(500).optional().describe("Per-vendor MOQ, minimum USD spend, lead time override, payment terms, email, and ship-to location rules."),
         use_live_shopify: z.boolean().default(false).describe("Pull live store SKUs from Shopify Admin GraphQL (Pro / License)."),
         demo_mode: z.boolean().default(false).describe("Generate full multi-vendor POs using the built-in Austin, TX merchant demo dataset."),
         service_level: ServiceLevelSchema,
@@ -253,15 +287,15 @@ export function createPoPilotServer(): McpServer {
     async (args) => {
       try {
         const entitlement = await resolveEntitlement();
-        const { source, signals, truncationMeta } = await resolveSkuInputs(args, entitlement.unlocked);
-        const plan = computeReplenishmentPlan(signals, {
-          serviceLevel: args.service_level,
-          reviewPeriodDays: args.review_period_days
-        });
         const rules =
           args.demo_mode && (!args.supplier_rules || args.supplier_rules.length === 0)
             ? DEMO_SUPPLIER_RULES
             : args.supplier_rules ?? [];
+        const { source, signals, truncationMeta } = await resolveSkuInputs(args, entitlement.unlocked, rules);
+        const plan = computeReplenishmentPlan(signals, {
+          serviceLevel: args.service_level,
+          reviewPeriodDays: args.review_period_days
+        });
         const poBundle = generateSupplierPurchaseOrders(plan.items, rules, args.po_prefix);
 
         return {
@@ -341,12 +375,17 @@ export function createPoPilotServer(): McpServer {
 
         if (!args.demo_mode && !entitlement.unlocked && basePayload.invoice_lines.length > FREE_LOCAL_MAX_INVOICE_LINES) {
           const cappedInvoiceLines = basePayload.invoice_lines.slice(0, FREE_LOCAL_MAX_INVOICE_LINES);
-          const allowedSkus = new Set(cappedInvoiceLines.map((l) => l.sku));
+          const allowedSkus = new Set(cappedInvoiceLines.map((l) => l.sku.trim()));
+          // If receiving_lines had entries for other SKUs, preserve a sentinel receiving check when filtering
+          const filteredReceiving = basePayload.receiving_lines.filter((l) => allowedSkus.has(l.sku.trim()));
           effectivePayload = {
             ...basePayload,
             invoice_lines: cappedInvoiceLines,
-            po_lines: basePayload.po_lines.filter((l) => allowedSkus.has(l.sku)),
-            receiving_lines: basePayload.receiving_lines.filter((l) => allowedSkus.has(l.sku))
+            po_lines: basePayload.po_lines.filter((l) => allowedSkus.has(l.sku.trim())),
+            receiving_lines:
+              basePayload.receiving_lines.length > 0 && filteredReceiving.length === 0
+                ? [{ sku: "__RECEIVING_LOG_PRESENT__", received_good_qty: 0, damaged_qty: 0 }]
+                : filteredReceiving
           };
           truncationMeta = {
             truncated_by_free_tier: true,

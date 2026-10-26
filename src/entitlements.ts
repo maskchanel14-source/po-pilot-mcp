@@ -24,6 +24,7 @@ export interface EntitlementResult {
   tier: "free_local" | "pro" | "agency" | "lifetime";
   source: "none" | "ed25519_offline" | "polar_api" | "invalid";
   reason?: string;
+  transient?: boolean;
 }
 
 interface CacheEntry {
@@ -31,7 +32,8 @@ interface CacheEntry {
   expiresAtMs: number;
 }
 
-const VALIDATION_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const GRANTED_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour for valid keys
+const REJECTED_CACHE_TTL_MS = 60 * 1000;     // 60 seconds for definitively invalid keys
 const entitlementCache = new Map<string, CacheEntry>();
 
 export function clearEntitlementCache(): void {
@@ -94,6 +96,16 @@ async function validatePolarLicenseKey(
       signal: AbortSignal.timeout(5000)
     });
 
+    if (response.status === 429 || response.status >= 500) {
+      return {
+        unlocked: false,
+        tier: "free_local",
+        source: "invalid",
+        reason: `polar_http_${response.status}`,
+        transient: true
+      };
+    }
+
     if (!response.ok) {
       return { unlocked: false, tier: "free_local", source: "invalid", reason: `polar_http_${response.status}` };
     }
@@ -104,7 +116,13 @@ async function validatePolarLicenseKey(
     }
     return { unlocked: false, tier: "free_local", source: "invalid", reason: `polar_status_${data.status ?? "unknown"}` };
   } catch {
-    return { unlocked: false, tier: "free_local", source: "invalid", reason: "polar_network_error" };
+    return {
+      unlocked: false,
+      tier: "free_local",
+      source: "invalid",
+      reason: "polar_network_error",
+      transient: true
+    };
   }
 }
 
@@ -143,7 +161,6 @@ export async function resolveEntitlement(options?: {
   if (rawKey.startsWith("POP1.")) {
     result = verifyEd25519Token(rawKey, publicKeySpkiB64);
   } else {
-    // Support single-string `<polar_org_uuid>:<license_key>` OR `POLAR_ORGANIZATION_ID` + `PO_PILOT_LICENSE_KEY`
     let orgId = polarOrgEnv;
     let licenseKey = rawKey;
     const colonIdx = rawKey.indexOf(":");
@@ -164,9 +181,13 @@ export async function resolveEntitlement(options?: {
     }
   }
 
-  entitlementCache.set(cacheKey, {
-    result,
-    expiresAtMs: Date.now() + VALIDATION_CACHE_TTL_MS
-  });
+  // Never poison cache on transient Wi-Fi / HTTP 5xx / 429 failures
+  if (!result.transient) {
+    entitlementCache.set(cacheKey, {
+      result,
+      expiresAtMs: Date.now() + (result.unlocked ? GRANTED_CACHE_TTL_MS : REJECTED_CACHE_TTL_MS)
+    });
+  }
+
   return result;
 }

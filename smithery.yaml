@@ -1,4 +1,5 @@
 # Smithery Registry Manifest — https://smithery.ai
+name: po-pilot-mcp
 startCommand:
   type: stdio
   configSchema:

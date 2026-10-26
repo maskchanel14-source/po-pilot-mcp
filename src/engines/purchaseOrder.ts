@@ -26,9 +26,12 @@ export interface SupplierPurchaseOrder {
   vendor_email_markdown: string;
 }
 
+const ABC_PRIORITY: Record<"A" | "B" | "C", number> = { A: 0, B: 1, C: 2 };
+
 /**
  * Groups replenishment items by vendor, enforces carton multiples + vendor MOQ (units & USD),
- * tops up highest-velocity A-items when just short of vendor minimum/free-freight, and renders CSV + email.
+ * tops up highest-velocity A-class SKUs using exact closed-form carton math when below vendor MOQ,
+ * and renders Shopify Native Draft PO CSV + vendor email markdown.
  */
 export function generateSupplierPurchaseOrders(
   items: ReplenishmentItemResult[],
@@ -36,7 +39,7 @@ export function generateSupplierPurchaseOrders(
   poPrefix = "PO-2026"
 ): { purchase_orders: SupplierPurchaseOrder[]; total_po_spend_usd: number } {
   const ruleMap = new Map<string, SupplierRule>();
-  for (const r of supplierRules) ruleMap.set(r.vendor.toLowerCase(), r);
+  for (const r of supplierRules) ruleMap.set(r.vendor.trim().toLowerCase(), r);
 
   const byVendor = new Map<string, ReplenishmentItemResult[]>();
   for (const item of items) {
@@ -52,24 +55,44 @@ export function generateSupplierPurchaseOrders(
     const actionable = vendorItems.filter((i) => i.recommended_order_units > 0);
     if (actionable.length === 0) continue;
 
-    const rule = ruleMap.get(vendor.toLowerCase());
+    const rule = ruleMap.get(vendor.trim().toLowerCase());
     const minUnits = rule?.min_order_units ?? 0;
     const minUsd = rule?.min_order_value_usd ?? 0;
 
     const working = actionable.map((i) => ({ ...i, finalQty: i.recommended_order_units }));
-    working.sort((a, b) => b.adjusted_daily_velocity - a.adjusted_daily_velocity);
+    // Prioritize A-class > B-class > C-class, breaking ties by fastest daily velocity
+    working.sort((a, b) => {
+      const classDiff = ABC_PRIORITY[a.abc_class] - ABC_PRIORITY[b.abc_class];
+      if (classDiff !== 0) return classDiff;
+      return b.adjusted_daily_velocity - a.adjusted_daily_velocity;
+    });
 
     let topUpApplied = false;
-    let safetyCounter = 0;
-    while (safetyCounter < 500) {
+    let unachievableUsdMinimum = false;
+
+    const bestUnitTarget = working[0];
+    if (bestUnitTarget) {
       const curUnits = working.reduce((s, w) => s + w.finalQty, 0);
-      const curUsd = working.reduce((s, w) => s + w.finalQty * w.unit_cost_usd, 0);
-      if (curUnits >= minUnits && curUsd >= minUsd) break;
-      const best = working[0];
-      if (!best || best.unit_cost_usd <= 0) break;
-      best.finalQty += best.case_pack;
-      topUpApplied = true;
-      safetyCounter++;
+      if (curUnits < minUnits) {
+        const extraCartons = Math.ceil((minUnits - curUnits) / bestUnitTarget.case_pack);
+        bestUnitTarget.finalQty += extraCartons * bestUnitTarget.case_pack;
+        topUpApplied = true;
+      }
+    }
+
+    const curUsdAfterUnits = working.reduce((s, w) => s + w.finalQty * w.unit_cost_usd, 0);
+    if (curUsdAfterUnits + 1e-9 < minUsd) {
+      const bestCostTarget = working.find((w) => w.unit_cost_usd > 0);
+      if (bestCostTarget) {
+        const cartonCost = bestCostTarget.case_pack * bestCostTarget.unit_cost_usd;
+        const extraCartons = Math.ceil((minUsd - curUsdAfterUnits - 1e-9) / cartonCost);
+        if (extraCartons > 0) {
+          bestCostTarget.finalQty += extraCartons * bestCostTarget.case_pack;
+          topUpApplied = true;
+        }
+      } else {
+        unachievableUsdMinimum = true;
+      }
     }
 
     const maxLead = Math.max(...working.map((w) => rule?.lead_time_days ?? w.lead_time_days));
@@ -94,7 +117,10 @@ export function generateSupplierPurchaseOrders(
     );
 
     const tableRows = lines
-      .map((l) => `| ${l.sku} | ${l.title} | ${l.cartons} (${l.case_pack}/ctn) | ${l.order_qty} | $${l.unit_cost_usd.toFixed(2)} | $${l.line_total_usd.toFixed(2)} |`)
+      .map(
+        (l) =>
+          `| ${l.sku} | ${l.title} | ${l.cartons} (${l.case_pack}/ctn) | ${l.order_qty} | $${l.unit_cost_usd.toFixed(2)} | $${l.line_total_usd.toFixed(2)} |`
+      )
       .join("\n");
 
     const emailMd = [
@@ -112,6 +138,13 @@ export function generateSupplierPurchaseOrders(
       `**Total Units:** ${totalUnits} | **PO Subtotal (USD):** $${subtotalUsd.toFixed(2)}`
     ].join("\n");
 
+    let moqNotes = "Natural replenishment quantities already met vendor MOQ.";
+    if (unachievableUsdMinimum) {
+      moqNotes = `Warning: Could not reach $${minUsd.toFixed(2)} vendor minimum because SKU unit costs are $0.00.`;
+    } else if (topUpApplied) {
+      moqNotes = `Auto-topped highest-priority A-SKU by carton multiples to satisfy vendor minimum (${minUnits} units / $${minUsd.toFixed(2)}).`;
+    }
+
     purchaseOrders.push({
       po_number: poNumber,
       vendor,
@@ -122,9 +155,7 @@ export function generateSupplierPurchaseOrders(
       total_units: totalUnits,
       subtotal_usd: subtotalUsd,
       moq_top_up_applied: topUpApplied,
-      moq_notes: topUpApplied
-        ? `Auto-topped fastest A-SKU by carton multiples to satisfy vendor minimum (${minUnits} units / $${minUsd.toFixed(2)}).`
-        : "Natural replenishment quantities already met vendor MOQ.",
+      moq_notes: moqNotes,
       lines,
       shopify_draft_po_csv: csv,
       vendor_email_markdown: emailMd

@@ -64,7 +64,8 @@ Run this from the repository root before uploading to Gumroad (`https://app.gumr
 
 ```bash
 zip -r po-pilot-gumroad-bundle-v1.0.0.zip \
-  src/ package.json tsconfig.json mcpize.yaml smithery.yaml glama.json \
+  src/ package.json tsconfig.json Dockerfile docker-compose.yml \
+  mcpize.yaml smithery.yaml glama.json server.json .well-known/ \
   README.md LICENSE .env.example \
   docs/LOOM-SCRIPT.md docs/RESEARCH-REPORT.md \
   sales-bundle/n8n-templates/

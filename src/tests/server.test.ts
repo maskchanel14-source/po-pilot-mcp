@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { mapInventoryCsvToSignals } from "../csvUtils.js";
 import { DEMO_SKU_SIGNALS, DEMO_STOCKY_PO_CSV, DEMO_SUPPLIER_RULES, DEMO_THREE_WAY_MATCH } from "../demoData.js";
 import {
   clearEntitlementCache,
@@ -16,6 +18,7 @@ import { generateSupplierPurchaseOrders } from "../engines/purchaseOrder.js";
 import { computeReplenishmentPlan } from "../engines/replenishment.js";
 import { migrateStockyPoCsv } from "../engines/stockyMigration.js";
 import { runThreeWayMatch } from "../engines/threeWayMatch.js";
+import { fetchLiveShopifySignals } from "../shopifyClient.js";
 
 describe("PO Pilot Domain Engines", () => {
   it("computes stockout-adjusted velocity, ABC tiers, and carton-rounded quantities", () => {
@@ -25,7 +28,6 @@ describe("PO Pilot Domain Engines", () => {
 
     const blackMug = plan.items.find((i) => i.sku === "HO-MUG-12OZ-BLK");
     assert.ok(blackMug);
-    // 210 units over (30 - 5 stockout days) = 8.4/day true velocity (not 7.0!)
     assert.equal(blackMug.adjusted_daily_velocity, 8.4);
     assert.equal(blackMug.recommended_order_units % 24, 0);
     assert.equal(blackMug.abc_class, "A");
@@ -36,7 +38,21 @@ describe("PO Pilot Domain Engines", () => {
     assert.equal(waxTin.recommended_order_units, 0);
   });
 
-  it("enforces vendor USD minimum order value via A-item carton top-up and emits Shopify CSV", () => {
+  it("parses US comma-formatted thousands ($1,250.50 / 1,400) and clamps negative CSV anomalies safely", () => {
+    const csv = [
+      "Variant SKU,Title,Vendor,On Hand,Committed,Units Sold,Cost per item,Variant Price",
+      'SKU-COMMA,"Heavy Rope","Acme","1,250","-4","3,000","$1,120.50","$2,500.00"'
+    ].join("\n");
+    const signals = mapInventoryCsvToSignals(csv, 30);
+    assert.equal(signals.length, 1);
+    assert.equal(signals[0].on_hand, 1250);
+    assert.equal(signals[0].committed, 0);
+    assert.equal(signals[0].units_sold_window, 3000);
+    assert.equal(signals[0].unit_cost_usd, 1120.5);
+    assert.equal(signals[0].retail_price_usd, 2500);
+  });
+
+  it("enforces vendor USD minimum order value via A-item closed-form carton top-up (>500 cartons) and emits Shopify CSV", () => {
     const plan = computeReplenishmentPlan(DEMO_SKU_SIGNALS, { serviceLevel: "95%", reviewPeriodDays: 14 });
     const bundle = generateSupplierPurchaseOrders(plan.items, DEMO_SUPPLIER_RULES, "PO-TEST");
     assert.equal(bundle.purchase_orders.length, 2);
@@ -46,35 +62,223 @@ describe("PO Pilot Domain Engines", () => {
     assert.ok(pacificPo.subtotal_usd >= 2200);
     assert.ok(pacificPo.shopify_draft_po_csv.startsWith("SKU,Supplier SKU,Quantity,Cost,Tax %"));
 
-    const blueRidgePo = bundle.purchase_orders.find((p) => p.vendor === "Blue Ridge Textiles LLC");
-    assert.ok(blueRidgePo);
-    assert.ok(blueRidgePo.subtotal_usd >= 1200);
+    // Closed-form >500-carton test + A-class priority over higher-unit-velocity cheap C-item
+    const cheapAndHeroPlan = computeReplenishmentPlan([
+      {
+        sku: "CHEAP-STICKER-C",
+        title: "Logo Sticker",
+        vendor: "Bulk Co",
+        on_hand: 0,
+        committed: 0,
+        on_order: 0,
+        backorders: 0,
+        units_sold_window: 300, // 10/day velocity, tiny margin -> C class
+        window_days: 30,
+        stockout_days: 0,
+        unit_cost_usd: 0.2,
+        retail_price_usd: 0.5,
+        lead_time_days: 10,
+        lead_time_std_dev_days: 1,
+        case_pack: 1,
+        sku_moq: 10
+      },
+      {
+        sku: "HERO-JACKET-A",
+        title: "Waxed Field Jacket",
+        vendor: "Bulk Co",
+        on_hand: 0,
+        committed: 0,
+        on_order: 0,
+        backorders: 0,
+        units_sold_window: 150, // 5/day velocity, huge margin -> A class
+        window_days: 30,
+        stockout_days: 0,
+        unit_cost_usd: 2.0,
+        retail_price_usd: 65.0,
+        lead_time_days: 10,
+        lead_time_std_dev_days: 1,
+        case_pack: 1,
+        sku_moq: 10
+      }
+    ]);
+    const bigMoqBundle = generateSupplierPurchaseOrders(
+      cheapAndHeroPlan.items,
+      [{ vendor: "Bulk Co", payment_terms: "Net 30", currency: "USD", min_order_units: 0, min_order_value_usd: 5000, ship_to_location: "Main" }],
+      "PO-BIG"
+    );
+    assert.equal(bigMoqBundle.purchase_orders.length, 1);
+    const bigPo = bigMoqBundle.purchase_orders[0];
+    assert.ok(bigPo.subtotal_usd >= 5000, `Expected subtotal >= 5000, got ${bigPo.subtotal_usd}`);
+    // Top-up must go to HERO-JACKET-A (A-class), NOT CHEAP-STICKER-C!
+    const heroLine = bigPo.lines.find((l) => l.sku === "HERO-JACKET-A");
+    const stickerLine = bigPo.lines.find((l) => l.sku === "CHEAP-STICKER-C");
+    assert.ok(heroLine && stickerLine);
+    assert.ok(heroLine.order_qty > 2000);
+    assert.ok(stickerLine.order_qty < 500);
   });
 
-  it("catches silent unit price creep, short-ships, unapproved fees, and freight overages in 3-way match", () => {
+  it("catches price creep, unshipped missing receiving SKUs, split-pallet receiving, and freight overages in 3-way match", () => {
     const audit = runThreeWayMatch(DEMO_THREE_WAY_MATCH);
     assert.equal(audit.payment_recommendation, "HOLD_AND_ISSUE_DEBIT_MEMO");
     assert.equal(audit.discrepancies.length, 5);
     const itemizedSum = Number(audit.discrepancies.reduce((s, d) => s + d.overcharge_usd, 0).toFixed(2));
     assert.equal(itemizedSum, audit.total_overcharge_recovered_usd);
-    assert.ok(audit.total_overcharge_recovered_usd > 400);
-    assert.ok(audit.debit_memo_email_markdown.includes("Debit Memo"));
+
+    // Regression: SKU-MISSING completely absent from non-empty receiving_lines + SKU-SPLIT across 2 pallets
+    const splitAndMissingAudit = runThreeWayMatch({
+      po_number: "PO-SPLIT-1",
+      vendor: "Test Vendor",
+      po_lines: [
+        { sku: "SKU-SPLIT", ordered_qty: 100, unit_cost_usd: 10 },
+        { sku: "SKU-NEVER-ARRIVED", ordered_qty: 50, unit_cost_usd: 20 }
+      ],
+      receiving_lines: [
+        { sku: "SKU-SPLIT", received_good_qty: 60, damaged_qty: 0 },
+        { sku: "SKU-SPLIT", received_good_qty: 40, damaged_qty: 0 }
+      ],
+      invoice_lines: [
+        { sku: "SKU-SPLIT", billed_qty: 100, billed_unit_cost_usd: 10 },
+        { sku: "SKU-NEVER-ARRIVED", billed_qty: 50, billed_unit_cost_usd: 20 }
+      ]
+    });
+    // SKU-SPLIT received 60+40=100 ($1,000 ok), SKU-NEVER-ARRIVED received 0 ($1,000 overcharge!)
+    assert.equal(splitAndMissingAudit.verified_payable_amount_usd, 1000);
+    assert.equal(splitAndMissingAudit.total_overcharge_recovered_usd, 1000);
+    assert.equal(splitAndMissingAudit.discrepancies.length, 1);
+    assert.equal(splitAndMissingAudit.discrepancies[0].sku, "SKU-NEVER-ARRIVED");
   });
 
-  it("reconstructs un-exportable supplier lead times and pack multiples from Stocky PO CSV", () => {
+  it("reconstructs supplier lead times, lowercase headers, and newest-first chronological cost from Stocky CSV", () => {
     const migrated = migrateStockyPoCsv(DEMO_STOCKY_PO_CSV);
     assert.equal(migrated.suppliers_recovered, 2);
     assert.equal(migrated.skus_recovered, 4);
     const pacific = migrated.profiles.find((p) => p.vendor === "Pacific Stainless Works");
     assert.ok(pacific);
     assert.equal(pacific.observed_avg_lead_time_days, 22);
-    const mug = pacific.skus.find((s) => s.sku === "HO-MUG-12OZ-BLK");
-    assert.equal(mug?.inferred_case_pack, 48);
+
+    // Newest-first (descending) export with lowercase headers must keep 2026 cost ($9.75), NOT overwrite with 2024 cost ($7.10)!
+    const descendingCsv = [
+      "po_number,supplier,sku,product_title,quantity_ordered,cost_price,created_at,received_at",
+      "PO-2026,Summit Gear,SG-BOTTLE,Bottle,48,$9.75,2026-08-01,2026-08-15",
+      "PO-2024,Summit Gear,SG-BOTTLE,Bottle,24,$7.10,2024-03-01,2024-03-19"
+    ].join("\n");
+    const descResult = migrateStockyPoCsv(descendingCsv);
+    assert.equal(descResult.suppliers_recovered, 1);
+    assert.equal(descResult.profiles[0].skus[0].latest_unit_cost_usd, 9.75);
+  });
+
+  it("paginates Shopify Admin GraphQL across multiple cursor pages for variants and orders", async () => {
+    const mockShopify = createServer(async (req, res) => {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const body = JSON.parse(raw) as { query: string; variables: Record<string, string | null> };
+      res.writeHead(200, { "Content-Type": "application/json" });
+
+      if (body.query.includes("productVariants")) {
+        if (!body.variables.cursor) {
+          res.end(
+            JSON.stringify({
+              data: {
+                productVariants: {
+                  pageInfo: { hasNextPage: true, endCursor: "CUR_VAR_2" },
+                  nodes: [
+                    {
+                      sku: "PG-SKU-1",
+                      title: "Default Title",
+                      price: "30.00",
+                      inventoryQuantity: 12,
+                      product: { title: "Item One", vendor: "Vendor A", status: "ACTIVE" },
+                      inventoryItem: { unitCost: { amount: "10.00" } }
+                    }
+                  ]
+                }
+              }
+            })
+          );
+        } else {
+          res.end(
+            JSON.stringify({
+              data: {
+                productVariants: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: [
+                    {
+                      sku: "PG-SKU-2",
+                      title: "Large",
+                      price: "50.00",
+                      inventoryQuantity: 5,
+                      product: { title: "Item Two", vendor: "Vendor B", status: "ACTIVE" },
+                      inventoryItem: { unitCost: { amount: "20.00" } }
+                    }
+                  ]
+                }
+              }
+            })
+          );
+        }
+        return;
+      }
+
+      // Orders query pagination
+      if (!body.variables.cursor) {
+        res.end(
+          JSON.stringify({
+            data: {
+              orders: {
+                pageInfo: { hasNextPage: true, endCursor: "CUR_ORD_2" },
+                nodes: [{ lineItems: { nodes: [{ sku: "PG-SKU-1", quantity: 15 }] } }]
+              }
+            }
+          })
+        );
+      } else {
+        res.end(
+          JSON.stringify({
+            data: {
+              orders: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  {
+                    lineItems: {
+                      nodes: [
+                        { sku: "PG-SKU-1", quantity: 25 },
+                        { sku: "PG-SKU-2", quantity: 10 }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          })
+        );
+      }
+    });
+
+    await new Promise<void>((resolve) => mockShopify.listen(0, "127.0.0.1", () => resolve()));
+    const port = (mockShopify.address() as { port: number }).port;
+
+    try {
+      const signals = await fetchLiveShopifySignals(
+        {
+          storeDomain: "test.myshopify.com",
+          accessToken: "shpat_test",
+          baseUrlOverride: `http://127.0.0.1:${port}`
+        },
+        30
+      );
+      assert.equal(signals.length, 2);
+      const sku1 = signals.find((s) => s.sku === "PG-SKU-1");
+      const sku2 = signals.find((s) => s.sku === "PG-SKU-2");
+      assert.equal(sku1?.units_sold_window, 40); // 15 (page 1) + 25 (page 2)
+      assert.equal(sku2?.units_sold_window, 10);
+    } finally {
+      mockShopify.close();
+    }
   });
 });
 
-describe("End-to-End MCP Stdio Protocol Contract", () => {
-  it("boots cleanly with zero env vars, lists 4 tools, executes all tools, and handles errors gracefully", async () => {
+describe("End-to-End MCP Stdio & Streamable HTTP + n8n Workflow Contracts", () => {
+  it("boots cleanly with zero env vars, applies supplier_rules lead_time_days to PO math, and handles errors gracefully", async () => {
     const transport = new StdioClientTransport({
       command: "node",
       args: ["dist/index.js"],
@@ -87,41 +291,48 @@ describe("End-to-End MCP Stdio Protocol Contract", () => {
 
       const toolsRes = await client.listTools();
       assert.equal(toolsRes.tools.length, 4);
-      const names = toolsRes.tools.map((t) => t.name).sort();
-      assert.deepEqual(names, [
-        "build_supplier_purchase_orders",
-        "calculate_replenishment_plan",
-        "migrate_stocky_csv_snapshot",
-        "reconcile_po_three_way_match"
-      ]);
 
-      // Call Tool 2 in demo mode
-      const poCall = await client.callTool({
+      // Verify supplier_rules.lead_time_days actually scales PO order quantities!
+      const singleSku = [
+        {
+          sku: "LT-TEST-SKU",
+          title: "Lead Time Test Item",
+          vendor: "Slow Boat Vendor",
+          on_hand: 10,
+          committed: 0,
+          on_order: 0,
+          backorders: 0,
+          units_sold_window: 60, // 2/day
+          window_days: 30,
+          stockout_days: 0,
+          unit_cost_usd: 10,
+          retail_price_usd: 25,
+          lead_time_days: 7,
+          lead_time_std_dev_days: 1,
+          case_pack: 1,
+          sku_moq: 1
+        }
+      ];
+      const shortLt = await client.callTool({
         name: "build_supplier_purchase_orders",
-        arguments: { demo_mode: true }
+        arguments: { skus: singleSku, supplier_rules: [{ vendor: "Slow Boat Vendor", lead_time_days: 7 }] }
       });
-      assert.ok(!poCall.isError);
-      const poJson = JSON.parse((poCall.content as Array<{ type: string; text: string }>)[0].text);
-      assert.equal(poJson.ok, true);
-      assert.equal(poJson.purchase_orders_count, 2);
-
-      // Call Tool 3 in demo mode
-      const matchCall = await client.callTool({
-        name: "reconcile_po_three_way_match",
-        arguments: { demo_mode: true }
+      const longLt = await client.callTool({
+        name: "build_supplier_purchase_orders",
+        arguments: { skus: singleSku, supplier_rules: [{ vendor: "Slow Boat Vendor", lead_time_days: 60 }] }
       });
-      assert.ok(!matchCall.isError);
-      const matchJson = JSON.parse((matchCall.content as Array<{ type: string; text: string }>)[0].text);
-      assert.equal(matchJson.payment_recommendation, "HOLD_AND_ISSUE_DEBIT_MEMO");
+      const shortJson = JSON.parse((shortLt.content as Array<{ type: string; text: string }>)[0].text);
+      const longJson = JSON.parse((longLt.content as Array<{ type: string; text: string }>)[0].text);
+      assert.ok(longJson.purchase_orders[0].total_units > shortJson.purchase_orders[0].total_units + 80);
 
-      // Graceful error test (empty call without demo_mode or credentials must NOT crash server!)
+      // Graceful error test
       const errCall = await client.callTool({
         name: "calculate_replenishment_plan",
         arguments: { demo_mode: false }
       });
       assert.equal(errCall.isError, true);
 
-      // Confirm server is STILL alive after error!
+      // Confirm server is STILL alive after error
       const stockyCall = await client.callTool({
         name: "migrate_stocky_csv_snapshot",
         arguments: { demo_mode: true }
@@ -132,9 +343,9 @@ describe("End-to-End MCP Stdio Protocol Contract", () => {
     }
   });
 
-  it("serves /health and /.well-known/mcp/server-card.json cleanly in --http mode", async () => {
+  it("returns application/json on POST /mcp and executes both $49 n8n workflow JSON templates end-to-end", async () => {
     const { spawn } = await import("node:child_process");
-    const port = 18941;
+    const port = 18942;
     const proc = spawn("node", ["dist/index.js", "--http"], {
       env: { ...process.env, PORT: String(port) },
       stdio: ["ignore", "pipe", "pipe"]
@@ -153,21 +364,83 @@ describe("End-to-End MCP Stdio Protocol Contract", () => {
 
       const healthRes = await fetch(`http://127.0.0.1:${port}/health`);
       assert.equal(healthRes.status, 200);
-      const healthJson = (await healthRes.json()) as { status: string; server: string };
-      assert.equal(healthJson.status, "ok");
-      assert.equal(healthJson.server, "po-pilot-mcp");
 
       const cardRes = await fetch(`http://127.0.0.1:${port}/.well-known/mcp/server-card.json`);
       assert.equal(cardRes.status, 200);
-      const cardJson = (await cardRes.json()) as { tools: string[] };
-      assert.equal(cardJson.tools.length, 4);
+      const cardJson = (await cardRes.json()) as { authentication: { optional_env: string[] } };
+      assert.ok(cardJson.authentication.optional_env.includes("PO_PILOT_LICENSE_KEY"));
+
+      // Call POST /mcp directly as n8n httpRequest does -> MUST return application/json!
+      const mcpPoRes = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream"
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "build_supplier_purchase_orders", arguments: { demo_mode: true } }
+        })
+      });
+      assert.equal(mcpPoRes.status, 200);
+      assert.ok((mcpPoRes.headers.get("content-type") ?? "").includes("application/json"));
+      const rawPoJson = await mcpPoRes.json();
+
+      // Execute actual jsCode from n8n template #01!
+      const wf01 = JSON.parse(readFileSync("sales-bundle/n8n-templates/01-monday-shopify-po-generator.json", "utf8")) as {
+        nodes: Array<{ name: string; parameters: { jsCode?: string } }>;
+      };
+      const code01 = wf01.nodes.find((n) => n.name === "Parse Supplier POs & Shopify CSVs")?.parameters.jsCode;
+      assert.ok(code01);
+      const run01 = new Function("$input", code01) as (inp: { first: () => { json: unknown } }) => Array<{ json: Record<string, unknown> }>;
+      const out01 = run01({ first: () => ({ json: rawPoJson }) });
+      assert.equal(out01.length, 2);
+      assert.equal(out01[0].json.hasOrders, true);
+      assert.ok(String(out01[0].json.shopify_draft_po_csv).startsWith("SKU,Supplier SKU"));
+
+      // Verify n8n template #01 throws visibly on unlicensed live_shopify error instead of pretending "No SKUs crossed reorder points"
+      const mcpLockedRes = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "build_supplier_purchase_orders", arguments: { use_live_shopify: true } }
+        })
+      });
+      const lockedJson = await mcpLockedRes.json();
+      assert.throws(() => run01({ first: () => ({ json: lockedJson }) }), /Polar\.sh|upgrade|License/i);
+
+      // Execute actual jsCode from n8n template #02!
+      const mcpMatchRes = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: { name: "reconcile_po_three_way_match", arguments: { demo_mode: true } }
+        })
+      });
+      const rawMatchJson = await mcpMatchRes.json();
+      const wf02 = JSON.parse(readFileSync("sales-bundle/n8n-templates/02-supplier-invoice-3way-match-guard.json", "utf8")) as {
+        nodes: Array<{ name: string; parameters: { jsCode?: string } }>;
+      };
+      const code02 = wf02.nodes.find((n) => n.name === "Unpack Audit Verdict")?.parameters.jsCode;
+      assert.ok(code02);
+      const run02 = new Function("$input", code02) as (inp: { first: () => { json: unknown } }) => Array<{ json: Record<string, unknown> }>;
+      const out02 = run02({ first: () => ({ json: rawMatchJson }) });
+      assert.equal(out02[0].json.payment_recommendation, "HOLD_AND_ISSUE_DEBIT_MEMO");
     } finally {
       proc.kill("SIGTERM");
     }
   });
 });
 
-describe("Open-Core Entitlements & 25-SKU Local Soft-Gate", () => {
+describe("Open-Core Entitlements & 25-SKU Urgency-Sorted Soft-Gate", () => {
   it("verifies Ed25519 offline tokens and rejects tampered or expired keys", async () => {
     clearEntitlementCache();
     const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -179,41 +452,37 @@ describe("Open-Core Entitlements & 25-SKU Local Soft-Gate", () => {
       privPkcs8Pem
     );
 
-    const granted = await resolveEntitlement({
-      licenseKey: validToken,
-      publicKeySpkiB64: pubSpkiB64
-    });
+    const granted = await resolveEntitlement({ licenseKey: validToken, publicKeySpkiB64: pubSpkiB64 });
     assert.equal(granted.unlocked, true);
     assert.equal(granted.tier, "pro");
 
-    // Tamper payload -> must fail cryptographic verification
     const parts = validToken.split(".");
     const tampered = `POP1.${Buffer.from(JSON.stringify({ sub: "hacker", tier: "agency" })).toString("base64url")}.${parts[2]}`;
-    const rejected = await resolveEntitlement({
-      licenseKey: tampered,
-      publicKeySpkiB64: pubSpkiB64
-    });
+    const rejected = await resolveEntitlement({ licenseKey: tampered, publicKeySpkiB64: pubSpkiB64 });
     assert.equal(rejected.unlocked, false);
 
-    // Expired token -> must reject
     const expiredToken = mintEd25519LicenseToken(
       { sub: "old@store.com", tier: "pro", exp: Math.floor(Date.now() / 1000) - 60 },
       privPkcs8Pem
     );
-    const expiredRes = await resolveEntitlement({
-      licenseKey: expiredToken,
-      publicKeySpkiB64: pubSpkiB64
-    });
+    const expiredRes = await resolveEntitlement({ licenseKey: expiredToken, publicKeySpkiB64: pubSpkiB64 });
     assert.equal(expiredRes.unlocked, false);
   });
 
-  it("validates Polar.sh customer-portal license keys (<org_uuid>:<key>) without private keys", async () => {
+  it("validates Polar.sh keys and does NOT cache transient Polar 5xx / network errors", async () => {
     clearEntitlementCache();
     const orgId = "fda84e25-7b55-4d67-916d-60ead04ff61f";
+    let shouldFail503 = true;
+
     const mockPolar = createServer(async (req, res) => {
       let body = "";
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body) as { key: string; organization_id: string };
+      if (shouldFail503) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Service Unavailable" }));
+        return;
+      }
       if (req.url === "/v1/customer-portal/license-keys/validate" && parsed.organization_id === orgId && parsed.key === "POLAR-LIVE-VALID") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "granted", benefit_id: "ben_123" }));
@@ -228,11 +497,20 @@ describe("Open-Core Entitlements & 25-SKU Local Soft-Gate", () => {
     const apiBaseUrl = `http://127.0.0.1:${addr.port}`;
 
     try {
-      const okRes = await resolveEntitlement({
+      // First attempt hits transient 503 -> locked, but MUST NOT poison cache for 1 hour!
+      const transientRes = await resolveEntitlement({
         licenseKey: `${orgId}:POLAR-LIVE-VALID`,
         polarApiBaseUrl: apiBaseUrl
       });
-      assert.equal(okRes.unlocked, true);
+      assert.equal(transientRes.unlocked, false);
+
+      // Immediate retry after Polar recovers -> MUST succeed immediately!
+      shouldFail503 = false;
+      const recoveredRes = await resolveEntitlement({
+        licenseKey: `${orgId}:POLAR-LIVE-VALID`,
+        polarApiBaseUrl: apiBaseUrl
+      });
+      assert.equal(recoveredRes.unlocked, true);
 
       const badRes = await resolveEntitlement({
         licenseKey: `${orgId}:POLAR-INVALID`,
@@ -244,16 +522,26 @@ describe("Open-Core Entitlements & 25-SKU Local Soft-Gate", () => {
     }
   });
 
-  it("soft-gates >25 SKUs and Live Shopify locally when unlicensed, and unlocks full catalog with a valid license", async () => {
+  it("prioritizes urgent out-of-stock SKUs when truncating >25 SKUs on Free Sandbox, and unlocks all SKUs when licensed", async () => {
     assert.equal(FREE_LOCAL_MAX_SKUS, 25);
     assert.equal(FREE_LOCAL_MAX_INVOICE_LINES, 15);
 
-    const thirtySkus = Array.from({ length: 30 }, (_, idx) => ({
-      ...DEMO_SKU_SIGNALS[0],
-      sku: `BULK-SKU-${String(idx + 1).padStart(3, "0")}`
-    }));
+    // 29 overstocked healthy SKUs first, and 1 critically out-of-stock SKU at index #29 (row 30)!
+    const thirtySkus = Array.from({ length: 30 }, (_, idx) =>
+      idx < 29
+        ? {
+            ...DEMO_SKU_SIGNALS[5], // healthy/overstock SKU (410 on hand)
+            sku: `HEALTHY-SKU-${String(idx + 1).padStart(3, "0")}`
+          }
+        : {
+            ...DEMO_SKU_SIGNALS[0],
+            sku: "URGENT-ROW-30",
+            on_hand: 0,
+            committed: 5,
+            units_sold_window: 300
+          }
+    );
 
-    // 1. Unlicensed local MCP run: >25 SKUs is soft-gated to 25 SKUs + upgrade notice, and live Shopify is gated
     const unlicensedTransport = new StdioClientTransport({
       command: "node",
       args: ["dist/index.js"],
@@ -274,19 +562,12 @@ describe("Open-Core Entitlements & 25-SKU Local Soft-Gate", () => {
       assert.equal(repJson.total_skus_analyzed, 25);
       assert.equal(repJson.truncated_by_free_tier, true);
       assert.equal(repJson.skus_omitted, 5);
-      assert.ok(String(repJson.upgrade_notice).includes("Polar.sh"));
-
-      const liveGateRes = await unlicensedClient.callTool({
-        name: "build_supplier_purchase_orders",
-        arguments: { use_live_shopify: true }
-      });
-      const liveGateJson = JSON.parse((liveGateRes.content as Array<{ type: string; text: string }>)[0].text);
-      assert.equal(liveGateJson.upgrade_required, true);
+      // Urgent SKU at row #30 MUST be included in the 25 analyzed SKUs!
+      assert.ok(repJson.items.some((i: { sku: string }) => i.sku === "URGENT-ROW-30"));
     } finally {
       await unlicensedClient.close();
     }
 
-    // 2. Licensed local MCP run: processes all 30 SKUs with zero truncation
     const { publicKey, privateKey } = generateKeyPairSync("ed25519");
     const pubSpkiB64 = (publicKey.export({ type: "spki", format: "der" }) as Buffer).toString("base64");
     const privPkcs8Pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;

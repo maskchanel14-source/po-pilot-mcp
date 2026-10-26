@@ -11,12 +11,14 @@
   },
   "files": [
     "dist",
+    "!dist/tests/**",
     "README.md",
     "LICENSE",
     "mcpize.yaml",
     "smithery.yaml",
     "glama.json",
-    "server.json"
+    "server.json",
+    ".well-known"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod +x dist/index.js",

@@ -134,7 +134,7 @@ Run `reconcile_po_three_way_match` with `demo_mode: true`. Cross-check our origi
 ### Maintainer Publish & Deploy Commands
 
 ```bash
-# 1. Verify build, 9 automated tests, and zero security advisories
+# 1. Verify build, 11 automated tests, and zero security advisories
 npm test && npm audit
 
 # 2. Publish to npm

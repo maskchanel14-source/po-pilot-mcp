@@ -23,7 +23,8 @@ export interface ThreeWayMatchResult {
 
 /**
  * Deterministic Accounts Payable 3-Way Match engine:
- * Cross-checks Purchase Order vs Warehouse Dock Receiving vs Supplier Invoice.
+ * Aggregates split-pallet / multi-row SKUs, then cross-checks Purchase Order vs
+ * Warehouse Dock Receiving vs Supplier Invoice.
  */
 export function runThreeWayMatch(input: {
   po_number: string;
@@ -34,27 +35,63 @@ export function runThreeWayMatch(input: {
   invoice_extra_fees_usd?: number;
   agreed_freight_cap_usd?: number;
 }): ThreeWayMatchResult {
-  const poMap = new Map(input.po_lines.map((l) => [l.sku, l]));
-  const recMap = new Map(input.receiving_lines.map((l) => [l.sku, l]));
+  // Aggregate duplicate SKU lines safely (e.g., split-pallet receiving or split-line invoices)
+  const poMap = new Map<string, { sku: string; ordered_qty: number; total_cost: number; unit_cost_usd: number }>();
+  for (const l of input.po_lines) {
+    const key = l.sku.trim();
+    const cur = poMap.get(key) ?? { sku: key, ordered_qty: 0, total_cost: 0, unit_cost_usd: l.unit_cost_usd };
+    cur.ordered_qty += l.ordered_qty;
+    cur.total_cost += l.ordered_qty * l.unit_cost_usd;
+    cur.unit_cost_usd = cur.ordered_qty > 0 ? cur.total_cost / cur.ordered_qty : l.unit_cost_usd;
+    poMap.set(key, cur);
+  }
+
+  const hasReceivingLog = input.receiving_lines.length > 0;
+  const recMap = new Map<string, { sku: string; received_good_qty: number; damaged_qty: number }>();
+  for (const r of input.receiving_lines) {
+    const key = r.sku.trim();
+    const cur = recMap.get(key) ?? { sku: key, received_good_qty: 0, damaged_qty: 0 };
+    cur.received_good_qty += r.received_good_qty;
+    cur.damaged_qty += r.damaged_qty ?? 0;
+    recMap.set(key, cur);
+  }
+
+  const invMap = new Map<string, { sku: string; billed_qty: number; total_billed: number; billed_unit_cost_usd: number }>();
+  for (const inv of input.invoice_lines) {
+    const key = inv.sku.trim();
+    const cur = invMap.get(key) ?? {
+      sku: key,
+      billed_qty: 0,
+      total_billed: 0,
+      billed_unit_cost_usd: inv.billed_unit_cost_usd
+    };
+    cur.billed_qty += inv.billed_qty;
+    cur.total_billed += inv.billed_qty * inv.billed_unit_cost_usd;
+    cur.billed_unit_cost_usd = cur.billed_qty > 0 ? cur.total_billed / cur.billed_qty : inv.billed_unit_cost_usd;
+    invMap.set(key, cur);
+  }
+
   const discrepancies: ThreeWayDiscrepancy[] = [];
+  const extraFees = input.invoice_extra_fees_usd ?? 0;
+  const freightCap = input.agreed_freight_cap_usd ?? Infinity;
 
-  let totalBilled = input.invoice_extra_fees_usd ?? 0;
-  let verifiedPayable = Math.min(input.invoice_extra_fees_usd ?? 0, input.agreed_freight_cap_usd ?? Infinity);
+  let totalBilled = extraFees;
+  let verifiedPayable = Math.min(extraFees, freightCap);
 
-  if ((input.invoice_extra_fees_usd ?? 0) > (input.agreed_freight_cap_usd ?? Infinity)) {
-    const diff = Number(((input.invoice_extra_fees_usd ?? 0) - (input.agreed_freight_cap_usd ?? 0)).toFixed(2));
+  if (extraFees > freightCap) {
+    const diff = Number((extraFees - (input.agreed_freight_cap_usd ?? 0)).toFixed(2));
     discrepancies.push({
       sku: "FREIGHT_AND_FEES",
       issue_type: "FREIGHT_CAP_EXCEEDED",
       po_expected: `$${(input.agreed_freight_cap_usd ?? 0).toFixed(2)} cap`,
       warehouse_received: "N/A",
-      vendor_billed: `$${(input.invoice_extra_fees_usd ?? 0).toFixed(2)}`,
+      vendor_billed: `$${extraFees.toFixed(2)}`,
       overcharge_usd: diff
     });
   }
 
-  for (const inv of input.invoice_lines) {
-    const lineBilled = inv.billed_qty * inv.billed_unit_cost_usd;
+  for (const inv of invMap.values()) {
+    const lineBilled = inv.total_billed;
     totalBilled += lineBilled;
 
     const po = poMap.get(inv.sku);
@@ -71,7 +108,10 @@ export function runThreeWayMatch(input: {
     }
 
     const rec = recMap.get(inv.sku);
-    const payableQty = Math.min(po.ordered_qty, rec ? rec.received_good_qty : po.ordered_qty, inv.billed_qty);
+    // Critical AP rule: when a warehouse receiving log IS supplied (`hasReceivingLog === true`),
+    // an unlisted SKU means 0 units arrived at the dock (never assume `po.ordered_qty`!).
+    const verifiedReceivedGoodQty = hasReceivingLog ? (rec?.received_good_qty ?? 0) : po.ordered_qty;
+    const payableQty = Math.min(po.ordered_qty, verifiedReceivedGoodQty, inv.billed_qty);
     const payableUnitCost = Math.min(po.unit_cost_usd, inv.billed_unit_cost_usd);
     verifiedPayable += payableQty * payableUnitCost;
 
@@ -81,7 +121,7 @@ export function runThreeWayMatch(input: {
         sku: inv.sku,
         issue_type: "SHORT_SHIP_BILLED",
         po_expected: `${po.ordered_qty} ordered`,
-        warehouse_received: `${rec?.received_good_qty ?? 0} good (${rec?.damaged_qty ?? 0} damaged)`,
+        warehouse_received: `${verifiedReceivedGoodQty} good (${rec?.damaged_qty ?? 0} damaged)`,
         vendor_billed: `${inv.billed_qty} billed`,
         overcharge_usd: Number((qtyDiff * payableUnitCost).toFixed(2))
       });
@@ -100,13 +140,16 @@ export function runThreeWayMatch(input: {
     }
   }
 
-  const totalPo = Number(input.po_lines.reduce((s, l) => s + l.ordered_qty * l.unit_cost_usd, 0).toFixed(2));
+  const totalPo = Number([...poMap.values()].reduce((s, l) => s + l.total_cost, 0).toFixed(2));
   totalBilled = Number(totalBilled.toFixed(2));
   verifiedPayable = Number(verifiedPayable.toFixed(2));
   const recovered = Number(Math.max(0, totalBilled - verifiedPayable).toFixed(2));
 
   const memoLines = discrepancies
-    .map((d) => `- **${d.sku}** (${d.issue_type}): Expected ${d.po_expected} | Received ${d.warehouse_received} | Billed ${d.vendor_billed} → **-$${d.overcharge_usd.toFixed(2)}**`)
+    .map(
+      (d) =>
+        `- **${d.sku}** (${d.issue_type}): Expected ${d.po_expected} | Received ${d.warehouse_received} | Billed ${d.vendor_billed} → **-$${d.overcharge_usd.toFixed(2)}**`
+    )
     .join("\n");
 
   const debitMemo =

@@ -9,15 +9,19 @@ const SERVER_CARD = {
   version: SERVER_VERSION,
   description:
     "Post-Stocky Shopify replenishment, MOQ/case-pack Purchase Order generator, Stocky CSV supplier recovery, and 3-way supplier invoice reconciliation MCP server.",
-  transport: ["stdio", "streamable-http"],
+  license: "MIT",
+  repository: "https://github.com/maskchanel14-source/po-pilot-mcp",
+  transports: ["stdio", "streamable-http"],
+  authentication: {
+    required: false,
+    optional_env: ["PO_PILOT_LICENSE_KEY", "SHOPIFY_STORE_DOMAIN", "SHOPIFY_ACCESS_TOKEN"]
+  },
   tools: [
     "calculate_replenishment_plan",
     "build_supplier_purchase_orders",
     "reconcile_po_three_way_match",
     "migrate_stocky_csv_snapshot"
-  ],
-  repository: "https://github.com/maskchanel14-source/po-pilot-mcp",
-  license: "MIT"
+  ]
 };
 
 async function startHttpServer(port: number): Promise<void> {
@@ -26,7 +30,10 @@ async function startHttpServer(port: number): Promise<void> {
 
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, mcp-session-id");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Accept, Authorization, mcp-session-id, mcp-protocol-version"
+    );
 
     if (req.method === "OPTIONS") {
       res.writeHead(204).end();
@@ -48,7 +55,10 @@ async function startHttpServer(port: number): Promise<void> {
     if (url === "/mcp") {
       try {
         const mcpServer = createPoPilotServer();
-        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+          enableJsonResponse: true
+        });
         res.on("close", () => {
           void transport.close();
           void mcpServer.close();
