@@ -6,4 +6,6 @@ coverage/
 .env.*
 !.env.example
 *.tgz
+*.zip
+release-artifacts/
 .DS_Store

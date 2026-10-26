@@ -10,4 +10,6 @@ scripts
 docs
 sales-bundle
 *.tgz
+*.zip
+release-artifacts
 npm-debug.log*

@@ -6,31 +6,24 @@ Ikuti urutan **6 langkah** di bawah ini karena beberapa registry saling membutuh
 
 ---
 
-## Langkah 1: Push & Merge ke Branch `main` di GitHub
+## Langkah 1: Pastikan Branch `main` Terbaru & Repo Berstatus Public
 
-Saat ini seluruh kode berada di working branch Arena (`arena/0a7ca7bf-po-pilot-mcp` — Pull Request `#3`). Agar marketplace membaca kode Anda dari repo publik `https://github.com/maskchanel14-source/po-pilot-mcp`:
-
-1. Commit & push branch ini lalu buat Pull Request ke `main` (bisa minta saya jalankan langsung di chat ini: *"tolong commit, push, dan buat/merge PR ke main"*).
-2. Pastikan repo GitHub berstatus **Public** agar skor inspeksi Glama, Smithery, dan GitHub OIDC berjalan gratis.
+Kode utama beserta seluruh perbaikan audit (PR `#1`–`#5` + PR rilis `#6`) berada di repo publik `https://github.com/maskchanel14-source/po-pilot-mcp` sehingga Glama, Smithery, MCPize, dan GitHub OIDC dapat memvalidasinya secara gratis (`$0`).
 
 ---
 
-## Langkah 2: Publish ke `npm` (Agar User Bisa `npx -y po-pilot-mcp@1.0.0`)
+## Langkah 2: Publish ke `npm` & Official MCP Registry (`npx -y po-pilot-mcp@1.0.0`)
 
-Ada **2 cara** (pilih salah satu):
+Ada **2 cara** (pilih salah satu — **Cara A cukup lewat browser tanpa terminal!**):
 
-### Cara A — Otomatis Lewat GitHub Actions (Sekalian Tembus Official MCP Registry!)
-1. Buat akun gratis di [npmjs.com](https://www.npmjs.com) → buka **Access Tokens** → **Generate New Token (Granular Access Token)** dengan izin *Read and write* untuk semua paket (tanpa 2FA prompt untuk CI).
-2. Buka GitHub repo `maskchanel14-source/po-pilot-mcp` → **Settings → Secrets and variables → Actions → New repository secret**:
+### Cara A — 1-Klik Lewat GitHub Release / GitHub Actions (Sekalian Tembus Official MCP Registry!)
+1. Buat akun gratis di [npmjs.com](https://www.npmjs.com) → klik profil → **Access Tokens** → **Generate New Token (Granular Access Token)**:
+   - Permissions: **Read and write** pada *Packages and scopes* (centang *Bypass two-factor authentication* agar CI bisa publish otomatis).
+2. Buka GitHub repo `https://github.com/maskchanel14-source/po-pilot-mcp/settings/secrets/actions` → **New repository secret**:
    - Name: `NPM_TOKEN`
-   - Value: *(paste token npm Anda)*
-3. Di terminal lokal Anda (setelah pull `main`), dorong tag rilis `v1.0.0`:
-   ```bash
-   git checkout main && git pull
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
-   GitHub Actions (`.github/workflows/publish-mcp.yml`) akan otomatis menjalankan `npm test`, merilis `po-pilot-mcp@1.0.0` ke **npm**, sekaligus mempublikasikan `server.json` ke **Official MCP Registry (`registry.modelcontextprotocol.io`)** menggunakan GitHub OIDC tanpa perlu instal CLI tambahan!
+   - Secret: *(paste token npm Anda)*
+3. Buka halaman **Releases** di GitHub (`https://github.com/maskchanel14-source/po-pilot-mcp/releases`) → buka Draft Release **`v1.0.0`** yang sudah disiapkan lengkap dengan lampiran ZIP → klik tombol hijau **"Publish release"** *(atau jalankan `Actions -> Release to npm & Official MCP Registry -> Run workflow`)*.
+   GitHub Actions (`.github/workflows/publish-mcp.yml`) akan otomatis menjalankan `npm test`, merilis `po-pilot-mcp@1.0.0` ke **npm** (dengan Sigstore Provenance), sekaligus mempublikasikan `server.json` ke **Official MCP Registry (`registry.modelcontextprotocol.io`)** menggunakan GitHub OIDC!
 
 ### Cara B — Manual dari Terminal Laptop
 ```bash
@@ -108,11 +101,10 @@ Jika memakai **n8n Cloud** atau ingin endpoint publik `https://...`:
 
 ## Langkah 6: Bungkus ZIP Produk Digital ($49 Early-Bird → $99 Solo / $249 Agency) untuk Polar.sh / Lemon Squeezy / Gumroad
 
-Jalankan perintah ini di root repo untuk membuat file ZIP siap upload ke Polar.sh, Lemon Squeezy, dan Gumroad:
+File **`po-pilot-post-stocky-kit-v1.0.0.zip`** sudah otomatis terlampir di halaman **GitHub Releases (`v1.0.0`)**, atau bisa dibuat ulang kapan saja dengan satu perintah:
 
 ```bash
-zip -r po-pilot-post-stocky-kit-v1.0.0.zip \
-  README.md LICENSE .env.example Dockerfile docker-compose.yml \
-  package.json tsconfig.json src/ \
-  sales-bundle/n8n-templates/
+npm run package:release
+# Hasil: release-artifacts/po-pilot-post-stocky-kit-v1.0.0.zip
 ```
+*(Script ini otomatis menyertakan `package-lock.json`, `.dockerignore`, `Dockerfile`, `docker-compose.yml`, `QUICKSTART-BUYERS.md`, dan ke-3 template JSON n8n, serta memblokir `scripts/mint-license.mjs` dan `.keys/` agar kunci privat pembuat lisensi tidak pernah ikut terbungkus).*

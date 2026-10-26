@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -1352,6 +1354,38 @@ describe("Pass-6 Deep Audit Regressions (Shopify CSV Handle Inheritance, Multi-L
       assert.equal(healthAfter413.status, 200);
     } finally {
       proc.kill("SIGTERM");
+    }
+  });
+
+  it("packages a complete buyer release ZIP (including package-lock.json & buyer quickstart, excluding creator signing scripts)", () => {
+    const outDir = mkdtempSync(join(tmpdir(), "po-pilot-release-test-"));
+    try {
+      execFileSync("node", ["scripts/package-release.mjs", "--out-dir", outDir], { encoding: "utf8" });
+      const zipPath = join(outDir, "po-pilot-post-stocky-kit-v1.0.0.zip");
+      const zipListing = execFileSync("python3", ["-m", "zipfile", "-l", zipPath], { encoding: "utf8" });
+
+      // Must include Docker + lockfile + MCP manifests + buyer quickstart + all 3 n8n templates
+      assert.ok(zipListing.includes("package-lock.json"), "ZIP must include package-lock.json for Dockerfile npm ci");
+      assert.ok(zipListing.includes("Dockerfile"));
+      assert.ok(zipListing.includes("docker-compose.yml"));
+      assert.ok(zipListing.includes(".dockerignore"));
+      assert.ok(zipListing.includes(".well-known/mcp/server-card.json"));
+      assert.ok(zipListing.includes("sales-bundle/QUICKSTART-BUYERS.md"));
+      assert.ok(zipListing.includes("sales-bundle/n8n-templates/01-monday-shopify-po-generator.json"));
+      assert.ok(zipListing.includes("sales-bundle/n8n-templates/02-supplier-invoice-3way-match-guard.json"));
+      assert.ok(zipListing.includes("sales-bundle/n8n-templates/03-email-pdf-invoice-auto-3way-match.json"));
+
+      // Must NEVER leak creator license signing scripts, private keys, or internal Indonesian creator notes
+      assert.ok(!zipListing.includes("mint-license.mjs"), "ZIP must never leak creator signing script");
+      assert.ok(!zipListing.includes(".keys/"), "ZIP must never include .keys/");
+      assert.ok(!zipListing.includes("DISTRIBUTION-CHANNELS-ID.md"), "ZIP must only ship buyer-facing files");
+
+      // Release workflow must trigger on GitHub Release publication, v* tags, and manual dispatch
+      const publishWf = readFileSync(".github/workflows/publish-mcp.yml", "utf8");
+      assert.ok(publishWf.includes("release:"));
+      assert.ok(publishWf.includes("published"));
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
     }
   });
 });

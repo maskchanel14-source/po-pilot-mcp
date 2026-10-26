@@ -22,6 +22,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod +x dist/index.js",
+    "package:release": "node scripts/package-release.mjs",
     "prepublishOnly": "npm test",
     "start": "node dist/index.js",
     "start:http": "node dist/index.js --http",
