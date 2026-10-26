@@ -47,6 +47,7 @@ query PoPilotOrdersPage($ordersQuery: String!, $cursor: String) {
         nodes {
           sku
           quantity
+          currentQuantity
         }
       }
     }
@@ -57,9 +58,14 @@ query PoPilotOrdersPage($ordersQuery: String!, $cursor: String) {
 const MAX_VARIANT_PAGES = 10; // up to 2,500 SKUs
 const MAX_ORDER_PAGES = 20;   // up to 5,000 paid orders per lookback window
 
+function stripEnvQuotes(val: string | undefined): string {
+  if (!val) return "";
+  return val.trim().replace(/^(['"])(.*)\1$/, "$2").trim();
+}
+
 export function resolveShopifyConfig(): ShopifyLiveConfig | null {
-  const rawDomain = process.env.SHOPIFY_STORE_DOMAIN?.trim();
-  const accessToken = process.env.SHOPIFY_ACCESS_TOKEN?.trim();
+  const rawDomain = stripEnvQuotes(process.env.SHOPIFY_STORE_DOMAIN);
+  const accessToken = stripEnvQuotes(process.env.SHOPIFY_ACCESS_TOKEN);
   if (!rawDomain || !accessToken) return null;
 
   const cleanDomain = rawDomain.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
@@ -72,7 +78,7 @@ export function resolveShopifyConfig(): ShopifyLiveConfig | null {
   return {
     storeDomain: cleanDomain,
     accessToken,
-    apiVersion: process.env.SHOPIFY_API_VERSION?.trim() || "2026-04"
+    apiVersion: stripEnvQuotes(process.env.SHOPIFY_API_VERSION) || "2026-04"
   };
 }
 
@@ -127,9 +133,9 @@ export async function fetchLiveShopifySignals(
     ? config.baseUrlOverride.replace(/\/+$/, "")
     : `https://${config.storeDomain}`;
   const endpoint = `${base}/admin/api/${config.apiVersion ?? "2026-04"}/graphql.json`;
-  const ordersQuery = `created_at:>=${sinceIso} financial_status:paid -status:cancelled`;
+  const ordersQuery = `created_at:>=${sinceIso} (financial_status:paid OR financial_status:partially_refunded OR financial_status:partially_paid) -status:cancelled`;
 
-  // 1. Paginate paid orders across lookback window
+  // 1. Paginate paid orders across lookback window (using net currentQuantity to exclude refunded units)
   const soldBySku = new Map<string, number>();
   let orderCursor: string | null = null;
   for (let page = 0; page < MAX_ORDER_PAGES; page++) {
@@ -137,7 +143,9 @@ export async function fetchLiveShopifySignals(
       orders?: {
         pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
         nodes?: Array<{
-          lineItems?: { nodes?: Array<{ sku: string | null; quantity: number }> };
+          lineItems?: {
+            nodes?: Array<{ sku: string | null; quantity: number; currentQuantity?: number | null }>;
+          };
         }>;
       };
     } = await postShopifyGraphql(endpoint, config.accessToken, ORDERS_PAGE_QUERY, {
@@ -148,9 +156,10 @@ export async function fetchLiveShopifySignals(
     for (const order of orderData.orders?.nodes ?? []) {
       for (const item of order.lineItems?.nodes ?? []) {
         const sku = item.sku?.trim();
-        if (sku && item.quantity > 0) {
+        const netQty = typeof item.currentQuantity === "number" ? item.currentQuantity : item.quantity;
+        if (sku && netQty > 0) {
           const skuKey = sku.toUpperCase();
-          soldBySku.set(skuKey, (soldBySku.get(skuKey) ?? 0) + item.quantity);
+          soldBySku.set(skuKey, (soldBySku.get(skuKey) ?? 0) + netQty);
         }
       }
     }

@@ -19,7 +19,7 @@ import { generateSupplierPurchaseOrders } from "../engines/purchaseOrder.js";
 import { computeReplenishmentPlan } from "../engines/replenishment.js";
 import { migrateStockyPoCsv } from "../engines/stockyMigration.js";
 import { runThreeWayMatch } from "../engines/threeWayMatch.js";
-import { fetchLiveShopifySignals } from "../shopifyClient.js";
+import { fetchLiveShopifySignals, resolveShopifyConfig } from "../shopifyClient.js";
 
 describe("PO Pilot Domain Engines", () => {
   it("computes stockout-adjusted velocity, ABC tiers, and carton-rounded quantities", () => {
@@ -1100,3 +1100,259 @@ describe("Open-Core Entitlements & 25-SKU Urgency-Sorted Soft-Gate", () => {
     assert.ok(composeText.includes("N8N_BLOCK_ENV_ACCESS_IN_NODE=false"));
   });
 });
+
+describe("Pass-6 Deep Audit Regressions (Shopify CSV Handle Inheritance, Multi-Location Velocity, AP Accounting & HTTP Hardening)", () => {
+  it("inherits Handle vendor/title/status across multi-variant Shopify products_export.csv rows and skips archived/draft products", () => {
+    const shopifyProductsExport = [
+      "Handle,Title,Vendor,Status,Option1 Name,Option1 Value,Variant SKU,Variant Barcode,Variant Inventory Qty,Variant Price,Cost per item",
+      "camp-mug,Double-Wall Camp Mug,Pacific Stainless Works,active,Color,Matte Black,HO-MUG-BLK,85001,10,28.00,6.40",
+      "camp-mug,,,,Color,Olive Drab,HO-MUG-OLV,85002,5,28.00,6.40",
+      "old-hat,Retired 2023 Hat,Old Vendor,archived,Title,Default Title,OLD-HAT-01,,0,20.00,5.00",
+      "old-hat,,,,Color,Navy,OLD-HAT-02,,0,20.00,5.00",
+      "draft-shirt,Unreleased Tee,Draft Vendor,draft,Size,Large,DRAFT-TEE-L,,25,32.00,8.00"
+    ].join("\n");
+
+    const parsed = mapInventoryCsvToSignals(shopifyProductsExport, 30);
+    assert.equal(parsed.length, 2, "Must exclude archived and draft parent/child rows");
+    assert.equal(parsed[0].sku, "HO-MUG-BLK");
+    assert.equal(parsed[0].vendor, "Pacific Stainless Works");
+    assert.equal(parsed[0].title, "Double-Wall Camp Mug - Matte Black");
+    assert.equal(parsed[1].sku, "HO-MUG-OLV");
+    assert.equal(parsed[1].vendor, "Pacific Stainless Works");
+    assert.equal(parsed[1].title, "Double-Wall Camp Mug - Olive Drab");
+  });
+
+  it("prevents 457% velocity inflation when merging multi-location SKUs with asymmetric stockout days and avoids single-PO GCD pack traps", () => {
+    const multiLocPlan = computeReplenishmentPlan([
+      {
+        sku: "MULTI-LOC-MUG",
+        title: "Camp Mug",
+        vendor: "Pacific Stainless",
+        on_hand: 200,
+        committed: 0,
+        on_order: 0,
+        backorders: 0,
+        units_sold_window: 150, // 5.0/day at main warehouse (0 stockout days)
+        window_days: 30,
+        stockout_days: 0,
+        unit_cost_usd: 6.4,
+        retail_price_usd: 28,
+        lead_time_days: 14,
+        lead_time_std_dev_days: 2,
+        case_pack: 12,
+        sku_moq: 12
+      },
+      {
+        sku: "MULTI-LOC-MUG",
+        title: "Camp Mug",
+        vendor: "Pacific Stainless",
+        on_hand: 0,
+        committed: 0,
+        on_order: 0,
+        backorders: 0,
+        units_sold_window: 10, // 2.0/day for 5 active days at popup location (25 stockout days)
+        window_days: 30,
+        stockout_days: 25,
+        unit_cost_usd: 6.4,
+        retail_price_usd: 28,
+        lead_time_days: 14,
+        lead_time_std_dev_days: 2,
+        case_pack: 12,
+        sku_moq: 12
+      }
+    ]);
+    assert.equal(multiLocPlan.items.length, 1);
+    assert.equal(multiLocPlan.items[0].adjusted_daily_velocity, 7);
+
+    // Single-PO SKU in Stocky CSV must NOT infer a prime/launch quantity (37) as carton case_pack
+    const singlePoStocky = migrateStockyPoCsv(
+      [
+        "PO Number,Supplier,SKU,Ordered Qty,Cost Price,Created At,Received At",
+        "PO-1,Acme Corp,SKU-PRIME,37,5.00,08/02/2026,08/17/2026"
+      ].join("\n")
+    );
+    assert.equal(singlePoStocky.profiles[0].skus[0].inferred_case_pack, 1);
+  });
+
+  it("blocks freight payment on 100%-damaged shipments and guarantees exact penny parity on half-cent wholesale unit prices", () => {
+    const shattered = runThreeWayMatch({
+      po_number: "PO-SHATTERED",
+      vendor: "Glassware Co",
+      po_lines: [{ sku: "GLASS-1", ordered_qty: 100, unit_cost_usd: 10 }],
+      receiving_lines: [{ sku: "GLASS-1", received_good_qty: 0, damaged_qty: 100 }],
+      invoice_lines: [{ sku: "GLASS-1", billed_qty: 100, billed_unit_cost_usd: 10 }],
+      invoice_extra_fees_usd: 100
+    });
+    assert.equal(shattered.payment_recommendation, "HOLD_AND_ISSUE_DEBIT_MEMO");
+    assert.equal(shattered.verified_payable_amount_usd, 0);
+    assert.equal(shattered.verified_bill_lines.length, 0);
+    assert.equal(shattered.total_overcharge_recovered_usd, 1100);
+    const shatteredBulletSum = Number(shattered.discrepancies.reduce((s, d) => s + d.overcharge_usd, 0).toFixed(2));
+    assert.equal(shatteredBulletSum, shattered.total_overcharge_recovered_usd);
+
+    const halfCent = runThreeWayMatch({
+      po_number: "PO-HALFCENT",
+      vendor: "Fastener Corp",
+      po_lines: [{ sku: "BOLT-M8", ordered_qty: 10, unit_cost_usd: 1.005 }],
+      receiving_lines: [{ sku: "BOLT-M8", received_good_qty: 7, damaged_qty: 3 }],
+      invoice_lines: [{ sku: "BOLT-M8", billed_qty: 10, billed_unit_cost_usd: 1.005 }]
+    });
+    const halfCentBulletSum = Number(halfCent.discrepancies.reduce((s, d) => s + d.overcharge_usd, 0).toFixed(2));
+    assert.equal(halfCentBulletSum, halfCent.total_overcharge_recovered_usd);
+  });
+
+  it("uses currentQuantity and partially_refunded orders in Shopify GraphQL, strips Docker .env quotes, parses tabular PDF freight, and enforces HTTP 413 cleanly", async () => {
+    // 1. Docker .env quote stripping on license keys & Shopify config
+    clearEntitlementCache();
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const pubSpkiB64 = (publicKey.export({ type: "spki", format: "der" }) as Buffer).toString("base64");
+    const privPem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+    const token = mintEd25519LicenseToken({ sub: "docker@store.com", tier: "pro" }, privPem);
+    const quotedLicenseRes = await resolveEntitlement({
+      licenseKey: `"${token}"`,
+      publicKeySpkiB64: `"${pubSpkiB64}"`
+    });
+    assert.equal(quotedLicenseRes.unlocked, true);
+
+    const prevDomain = process.env.SHOPIFY_STORE_DOMAIN;
+    const prevToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    try {
+      process.env.SHOPIFY_STORE_DOMAIN = '"harbor-oak.myshopify.com"';
+      process.env.SHOPIFY_ACCESS_TOKEN = "'shpat_docker_quoted'";
+      const cfg = resolveShopifyConfig();
+      assert.ok(cfg);
+      assert.equal(cfg.storeDomain, "harbor-oak.myshopify.com");
+      assert.equal(cfg.accessToken, "shpat_docker_quoted");
+    } finally {
+      if (prevDomain === undefined) delete process.env.SHOPIFY_STORE_DOMAIN;
+      else process.env.SHOPIFY_STORE_DOMAIN = prevDomain;
+      if (prevToken === undefined) delete process.env.SHOPIFY_ACCESS_TOKEN;
+      else process.env.SHOPIFY_ACCESS_TOKEN = prevToken;
+    }
+
+    // 2. Live Shopify GraphQL partially_refunded query + currentQuantity net sales subtraction
+    let observedOrdersQuery = "";
+    const mockShopify = createServer(async (req, res) => {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const body = JSON.parse(raw) as { query: string; variables: Record<string, string | null> };
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (body.query.includes("productVariants")) {
+        res.end(
+          JSON.stringify({
+            data: {
+              productVariants: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  {
+                    sku: "NET-SKU-1",
+                    title: "Default Title",
+                    price: "40.00",
+                    inventoryQuantity: 10,
+                    product: { title: "Canvas Hat", vendor: "Hat Co", status: "ACTIVE" },
+                    inventoryItem: { unitCost: { amount: "12.00" } }
+                  }
+                ]
+              }
+            }
+          })
+        );
+        return;
+      }
+      observedOrdersQuery = String(body.variables.ordersQuery ?? "");
+      res.end(
+        JSON.stringify({
+          data: {
+            orders: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [
+                {
+                  // Ordered 10, refunded 3 -> currentQuantity is 7!
+                  lineItems: { nodes: [{ sku: "NET-SKU-1", quantity: 10, currentQuantity: 7 }] }
+                }
+              ]
+            }
+          }
+        })
+      );
+    });
+    await new Promise<void>((resolve) => mockShopify.listen(0, "127.0.0.1", () => resolve()));
+    const shopifyPort = (mockShopify.address() as { port: number }).port;
+    try {
+      const signals = await fetchLiveShopifySignals(
+        {
+          storeDomain: "test.myshopify.com",
+          accessToken: "shpat_test",
+          baseUrlOverride: `http://127.0.0.1:${shopifyPort}`
+        },
+        30
+      );
+      assert.ok(observedOrdersQuery.includes("partially_refunded"));
+      assert.equal(signals[0].units_sold_window, 7);
+    } finally {
+      mockShopify.close();
+    }
+
+    // 3. n8n Template #03 tabular freight row ("Shipping & Handling   1   $240.00") + shipping method header ignore + ISO dates
+    const wf03 = JSON.parse(
+      readFileSync("sales-bundle/n8n-templates/03-email-pdf-invoice-auto-3way-match.json", "utf8")
+    ) as { nodes: Array<{ name: string; parameters: { jsCode?: string } }> };
+    const runPdf = new Function("$input", wf03.nodes.find((n) => n.name === "Parse PDF Invoice Text")!.parameters.jsCode!) as (inp: {
+      first: () => { json: Record<string, unknown> };
+    }) => Array<{ json: Record<string, unknown> }>;
+
+    const tabularPdf = runPdf({
+      first: () => ({
+        json: {
+          text: [
+            "INVOICE #: INV-7788",
+            "Invoice Date: 2026-10-01",
+            "Due Date: 2026-10-31",
+            "Shipping Method: Route 66 Freight",
+            "PO #: PO-2026-1042",
+            "Vendor: Pacific Stainless Works",
+            "HO-MUG-12OZ-BLK  Camp Mug  240  $6.85  $1,644.00",
+            "Subtotal   1   $1,644.00",
+            "Shipping & Handling   1   $240.00"
+          ].join("\n"),
+          po_lines: [{ sku: "HO-MUG-12OZ-BLK", ordered_qty: 240, unit_cost_usd: 6.4 }]
+        }
+      })
+    })[0].json;
+    assert.equal(tabularPdf.invoice_extra_fees_usd, 240);
+    assert.equal(tabularPdf.invoice_date, "2026-10-01");
+    assert.equal(tabularPdf.due_date, "2026-10-31");
+
+    // 4. HTTP --port CLI flag + 413 Payload Too Large clean response & server liveness
+    const { spawn } = await import("node:child_process");
+    const httpPort = 18977;
+    const proc = spawn("node", ["dist/index.js", "--http", "--port", String(httpPort)], {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("HTTP --port startup timeout")), 4000);
+        proc.stderr.on("data", (chunk: Buffer) => {
+          if (chunk.toString().includes(String(httpPort))) {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+      });
+
+      const oversizedBody = "x".repeat(10 * 1024 * 1024 + 1024);
+      const res413 = await fetch(`http://127.0.0.1:${httpPort}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: oversizedBody
+      });
+      assert.equal(res413.status, 413);
+
+      const healthAfter413 = await fetch(`http://127.0.0.1:${httpPort}/health`);
+      assert.equal(healthAfter413.status, 200);
+    } finally {
+      proc.kill("SIGTERM");
+    }
+  });
+});
+

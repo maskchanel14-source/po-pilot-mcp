@@ -15,7 +15,7 @@ import {
   UPGRADE_NOTICE
 } from "./entitlements.js";
 import { generateSupplierPurchaseOrders } from "./engines/purchaseOrder.js";
-import { computeReplenishmentPlan, deduplicateSignals } from "./engines/replenishment.js";
+import { computeReplenishmentPlan, deduplicateSignals, type MergedSkuSignal } from "./engines/replenishment.js";
 import { migrateStockyPoCsv } from "./engines/stockyMigration.js";
 import { runThreeWayMatch } from "./engines/threeWayMatch.js";
 import { fetchLiveShopifySignals, resolveShopifyConfig } from "./shopifyClient.js";
@@ -93,7 +93,7 @@ class LiveShopifyEntitlementError extends Error {
   }
 }
 
-function applySupplierRuleOverrides(signals: SkuSignal[], rules: SupplierRule[]): SkuSignal[] {
+function applySupplierRuleOverrides(signals: MergedSkuSignal[], rules: SupplierRule[]): MergedSkuSignal[] {
   if (rules.length === 0) return signals;
   const leadByVendor = new Map<string, number>();
   for (const r of rules) {
@@ -109,9 +109,9 @@ function applySupplierRuleOverrides(signals: SkuSignal[], rules: SupplierRule[])
   });
 }
 
-function estimateDaysOfCoverRatio(s: SkuSignal): number {
+function estimateDaysOfCoverRatio(s: MergedSkuSignal): number {
   const activeDays = Math.max(1, s.window_days - Math.min(s.stockout_days, s.window_days - 1));
-  const dailyVel = s.units_sold_window / activeDays;
+  const dailyVel = s._mergedDailyVelocity ?? s.units_sold_window / activeDays;
   const invPos = s.on_hand + s.on_order - s.committed - s.backorders;
   if (dailyVel <= 0) {
     return invPos < 0 ? -1_000_000 + invPos : Number.POSITIVE_INFINITY;
@@ -217,6 +217,11 @@ export function createPoPilotServer(): McpServer {
       inputSchema: {
         skus: z.array(SkuSignalSchema).max(2500).optional().describe("Structured SKU inventory + velocity rows."),
         inventory_csv: z.string().max(2_000_000).optional().describe("Raw CSV exported from Shopify Admin Products or merchant reorder spreadsheet."),
+        supplier_rules: z
+          .array(SupplierRuleSchema)
+          .max(500)
+          .optional()
+          .describe("Optional supplier rules (e.g. from migrate_stocky_csv_snapshot) to apply vendor lead_time_days overrides."),
         use_live_shopify: z.boolean().default(false).describe("Pull live variants and paid order velocity from configured Shopify Admin GraphQL API (Pro / License)."),
         demo_mode: z.boolean().default(false).describe("Run immediately against the built-in US Shopify merchant dataset (no API keys required)."),
         service_level: ServiceLevelSchema,
@@ -233,7 +238,11 @@ export function createPoPilotServer(): McpServer {
     async (args) => {
       try {
         const entitlement = await resolveEntitlement();
-        const { source, signals, truncationMeta } = await resolveSkuInputs(args, entitlement.unlocked);
+        const { source, signals, truncationMeta } = await resolveSkuInputs(
+          args,
+          entitlement.unlocked,
+          args.supplier_rules ?? []
+        );
         const summary = computeReplenishmentPlan(signals, {
           serviceLevel: args.service_level,
           reviewPeriodDays: args.review_period_days
