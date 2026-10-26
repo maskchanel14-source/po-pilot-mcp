@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,10 +12,14 @@ import { escapeCsvCell, mapInventoryCsvToSignals, parseCsv } from "../csvUtils.j
 import { DEMO_SKU_SIGNALS, DEMO_STOCKY_PO_CSV, DEMO_SUPPLIER_RULES, DEMO_THREE_WAY_MATCH } from "../demoData.js";
 import {
   clearEntitlementCache,
+  DEFAULT_POLAR_ORGANIZATION_ID,
   FREE_LOCAL_MAX_INVOICE_LINES,
   FREE_LOCAL_MAX_SKUS,
+  MCPIZE_CLOUD_URL,
   mintEd25519LicenseToken,
-  resolveEntitlement
+  POLAR_SOLO_CHECKOUT_URL,
+  resolveEntitlement,
+  UPGRADE_NOTICE
 } from "../entitlements.js";
 import { generateSupplierPurchaseOrders } from "../engines/purchaseOrder.js";
 import { computeReplenishmentPlan } from "../engines/replenishment.js";
@@ -1387,6 +1391,60 @@ describe("Pass-6 Deep Audit Regressions (Shopify CSV Handle Inheritance, Multi-L
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }
+  });
+
+  it("wires live Polar.sh ($49) & MCPize ($29/mo) URLs, hero product image, and default Polar org validation", async () => {
+    clearEntitlementCache();
+    assert.equal(DEFAULT_POLAR_ORGANIZATION_ID, "451b88fb-d285-4c16-b86c-9a8cb33fb09c");
+    assert.equal(
+      POLAR_SOLO_CHECKOUT_URL,
+      "https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV"
+    );
+    assert.equal(MCPIZE_CLOUD_URL, "https://mcpize.com/mcp/po-pilot-mcp");
+    assert.ok(UPGRADE_NOTICE.includes(POLAR_SOLO_CHECKOUT_URL));
+    assert.ok(UPGRADE_NOTICE.includes(MCPIZE_CLOUD_URL));
+
+    // Bare Polar key (without `<org_uuid>:` prefix) must validate automatically against DEFAULT_POLAR_ORGANIZATION_ID
+    const mockPolar = createServer(async (req, res) => {
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body) as { key: string; organization_id: string };
+      if (
+        req.url === "/v1/customer-portal/license-keys/validate" &&
+        parsed.organization_id === DEFAULT_POLAR_ORGANIZATION_ID &&
+        parsed.key === "POPILOT-BARE-BUYER-KEY"
+      ) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "granted", benefit_id: "70a36925-242f-47b9-bd53-4968cd5dfe8c" }));
+        return;
+      }
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "revoked" }));
+    });
+
+    await new Promise<void>((resolve) => mockPolar.listen(0, "127.0.0.1", () => resolve()));
+    const addr = mockPolar.address() as { port: number };
+    try {
+      const bareRes = await resolveEntitlement({
+        licenseKey: "POPILOT-BARE-BUYER-KEY",
+        polarApiBaseUrl: `http://127.0.0.1:${addr.port}`
+      });
+      assert.equal(bareRes.unlocked, true);
+      assert.equal(bareRes.source, "polar_api");
+    } finally {
+      mockPolar.close();
+    }
+
+    const coverPath = "docs/assets/po-pilot-product-cover.jpg";
+    assert.ok(existsSync(coverPath), "Optimized product cover image must exist in docs/assets/");
+    const coverStats = statSync(coverPath);
+    assert.ok(coverStats.size > 20_000 && coverStats.size < 450_000, "Cover JPEG must be crisp yet lightweight (<450KB)");
+
+    const readme = readFileSync("README.md", "utf8");
+    assert.ok(readme.includes(POLAR_SOLO_CHECKOUT_URL), "README must link directly to Polar.sh $49 checkout");
+    assert.ok(readme.includes(MCPIZE_CLOUD_URL), "README must link directly to MCPize Cloud listing");
+    assert.ok(readme.includes("https://www.npmjs.com/package/po-pilot-mcp"), "README must link to npm package");
+    assert.ok(readme.includes("po-pilot-product-cover.jpg"), "README must embed product hero banner");
   });
 });
 

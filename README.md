@@ -1,9 +1,24 @@
 # PO Pilot MCP (`po-pilot-mcp`)
 
+[![npm v1.0.0](https://img.shields.io/badge/npm-po--pilot--mcp%401.0.0-cb3837.svg)](https://www.npmjs.com/package/po-pilot-mcp)
+[![Get Pro Kit ($49)](https://img.shields.io/badge/Polar.sh-Get_Pro_Kit_%2B_3_n8n_Workflows_(%2449)-10B981.svg)](https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV)
+[![Hosted Cloud ($0 / $29)](https://img.shields.io/badge/MCPize_Cloud-Try_Free_%2F_%2429_mo-6366F1.svg)](https://mcpize.com/mcp/po-pilot-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen.svg)](package.json)
-[![MCP SDK 1.32.2](https://img.shields.io/badge/MCP_SDK-1.32.2-purple.svg)](package.json)
 [![Zero Required Secrets](https://img.shields.io/badge/Cold_Start-Zero_Keys_Required-success.svg)](mcpize.yaml)
+
+<p align="center">
+  <a href="https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV">
+    <img src="https://raw.githubusercontent.com/maskchanel14-source/po-pilot-mcp/main/docs/assets/po-pilot-product-cover.jpg" alt="PO Pilot — Post-Stocky Shopify PO & 3-Way Match Kit" width="100%" />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV"><strong>Unlock Unlimited Pro Kit + 3 n8n Workflows ($49 One-Time) →</strong></a>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="https://mcpize.com/mcp/po-pilot-mcp"><strong>Launch Zero-Install Hosted Cloud ($0 / $29 mo) →</strong></a>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="https://www.npmjs.com/package/po-pilot-mcp"><strong>Install via npm (`npx -y po-pilot-mcp@1.0.0`) →</strong></a>
+</p>
 
 **Post-Stocky replenishment math, Open-to-Buy & US tariff landed-cost Purchase Orders, Shopify POS barcode Transfer CSVs, Stocky CSV supplier recovery, and Accounts Payable 3-way invoice matching (with QuickBooks Online & Xero Bill CSV exports) for Shopify merchants and US wholesalers.**
 
@@ -123,17 +138,17 @@ Run `reconcile_po_three_way_match` with `demo_mode: true`. Cross-check our origi
 
 ---
 
-## Pricing & Entitlements (`mcpize.yaml`)
+## Pricing & Entitlements
 
-- **Local Free Sandbox (`npx -y po-pilot-mcp@1.0.0`)**: `$0` — unlimited Stocky CSV supplier recovery (`migrate_stocky_csv_snapshot`), full `demo_mode`, and up to **25 SKUs / 15 unique invoice SKUs per call** via CSV or JSON.
-- **Self-Hosted Lifetime Licenses + 3 n8n Automation Workflows (Polar.sh / Gumroad)**:
-  - **Early-Bird Launch (First 25 Buyers)**: **`$49` one-time** (`Solo Store Unlimited` — 1 Shopify store, Unlimited SKUs & invoice lines, Live Shopify Admin GraphQL, Open-to-Buy cashflow optimizer, and all **3 ready-to-import n8n workflows** `#01`, `#02`, `#03` via `PO_PILOT_LICENSE_KEY`).
+- **Local Free Sandbox ([`npx -y po-pilot-mcp@1.0.0`](https://www.npmjs.com/package/po-pilot-mcp))**: `$0` — unlimited Stocky CSV supplier recovery (`migrate_stocky_csv_snapshot`), full `demo_mode`, and up to **25 SKUs / 15 unique invoice SKUs per call** via CSV or JSON.
+- **Self-Hosted Lifetime Licenses + 3 n8n Automation Workflows ([Buy on Polar.sh →](https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV))**:
+  - **[Early-Bird Launch — `$49` one-time (First 25 Buyers)](https://buy.polar.sh/polar_cl_CjxzvoIki9VjrF1GLL4o7dwAnq4DIkr7ON42M2NHQzV)**: `Solo Store Unlimited` — 1 Shopify store, Unlimited SKUs & invoice lines, Live Shopify Admin GraphQL, Open-to-Buy cashflow optimizer, and all **3 ready-to-import n8n workflows** (`#01`, `#02`, `#03`) via `PO_PILOT_LICENSE_KEY`.
   - **Regular Solo Store**: **`$99` one-time** (after first 25 launch licenses).
   - **3PL / Fractional CFO / Agency License**: **`$249` one-time** (up to **10 client Shopify stores** + multi-warehouse & QuickBooks/Xero AP workflow deployment rights).
-- **MCPize Managed Cloud**:
-  - **Free Sandbox**: `$0/month` — **15 requests/month** (instant zero-setup evaluation).
-  - **Cloud Pro**: `$29/month` — **500 requests/month** (unlimited SKUs + Live Shopify sync + Landed Cost/OTB + QBO/Xero Bill CSVs).
-  - **Cloud Agency / 3PL**: `$79/month` — **3,000 requests/month** (for multi-brand operators, 3PLs, and automated n8n AP monitors).
+- **MCPize Managed Cloud ([Subscribe on MCPize →](https://mcpize.com/mcp/po-pilot-mcp))**:
+  - **[Free Sandbox (`$0/month`)](https://mcpize.com/mcp/po-pilot-mcp)** — **15 requests/month** (instant zero-setup evaluation).
+  - **[Cloud Pro (`$29/month`)](https://mcpize.com/mcp/po-pilot-mcp)** — **500 requests/month** (unlimited SKUs + Live Shopify sync + Landed Cost/OTB + QBO/Xero Bill CSVs).
+  - **[Cloud Agency / 3PL (`$79/month`)](https://mcpize.com/mcp/po-pilot-mcp)** — **3,000 requests/month** (for multi-brand operators, 3PLs, and automated n8n AP monitors).
 
 ### Maintainer Publish & Deploy Commands
 
