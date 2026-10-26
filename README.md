@@ -125,7 +125,7 @@ Run `reconcile_po_three_way_match` with `demo_mode: true`. Cross-check our origi
 
 ## Pricing & Entitlements (`mcpize.yaml`)
 
-- **Local Free Sandbox (`npx -y po-pilot-mcp`)**: `$0` — unlimited Stocky CSV supplier recovery (`migrate_stocky_csv_snapshot`), full `demo_mode`, and up to **25 SKUs / 15 invoice lines per call** via CSV or JSON.
+- **Local Free Sandbox (`npx -y po-pilot-mcp@1.0.0`)**: `$0` — unlimited Stocky CSV supplier recovery (`migrate_stocky_csv_snapshot`), full `demo_mode`, and up to **25 SKUs / 15 unique invoice SKUs per call** via CSV or JSON.
 - **Self-Hosted Lifetime Licenses + 3 n8n Automation Workflows (Polar.sh / Gumroad)**:
   - **Early-Bird Launch (First 25 Buyers)**: **`$49` one-time** (`Solo Store Unlimited` — 1 Shopify store, Unlimited SKUs & invoice lines, Live Shopify Admin GraphQL, Open-to-Buy cashflow optimizer, and all **3 ready-to-import n8n workflows** `#01`, `#02`, `#03` via `PO_PILOT_LICENSE_KEY`).
   - **Regular Solo Store**: **`$99` one-time** (after first 25 launch licenses).

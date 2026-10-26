@@ -1,6 +1,8 @@
 # PRODUCT-BRIEF: PO Pilot MCP (`po-pilot-mcp`)
 *Generated: 2026-10-26 | Skills Invoked: `brainstorming` (`obra`), `council` (`affan`), `product-lens` (`affan`), `before-you-build` (`agents`)*
 
+> **Catatan Arsip Desain Awal (Phase 2):** Dokumen ini merekam keputusan seleksi produk awal pada Phase 2. Untuk spesifikasi fitur produksi terbaru (**Shopify POS Transfer CSV**, **US Tariff Landed Cost + Open-to-Buy**, **QuickBooks/Xero Verified Bill CSV**, **3 Workflow n8n `#01/#02/#03`**) dan struktur harga rilis aktif (**$49 Early-Bird → $99 Solo / $249 Agency**, **Cloud Pro $29/bln / Agency $79/bln**), acuan resminya adalah [`README.md`](../README.md).
+
 ---
 
 ## 1. Evaluasi 3 Ide MCP Berdasarkan Temuan Riset Phase 1

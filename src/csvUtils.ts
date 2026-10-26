@@ -93,8 +93,13 @@ export function parseCsv(rawCsv: string): Array<Record<string, string>> {
 export function escapeCsvCell(value: string | number): string {
   let str = String(value);
   // OWASP CWE-1236: neutralize spreadsheet formula/DDE injection on string cells
-  if (typeof value === "string" && (/^[=@\t\r]/.test(str) || /^[+-](?![0-9])/.test(str))) {
-    str = `'${str}`;
+  // Allow plain signed numbers (e.g. "-12.50"), neutralize any other leading =, +, -, @, tab/CR/LF or whitespace-prefixed formula
+  if (typeof value === "string") {
+    const trimmed = str.trimStart();
+    const isPlainSignedNumber = /^[+-]?[0-9]+(?:\.[0-9]+)?$/.test(str.trim());
+    if (/^[\t\r\n]/.test(str) || (/^[=+\-@]/.test(trimmed) && !isPlainSignedNumber)) {
+      str = `'${str}`;
+    }
   }
   if (/[",\r\n]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;

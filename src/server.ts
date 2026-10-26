@@ -417,9 +417,21 @@ export function createPoPilotServer(): McpServer {
         let truncationMeta: Record<string, unknown> = {};
         let effectivePayload = basePayload;
 
-        if (!args.demo_mode && !entitlement.unlocked && basePayload.invoice_lines.length > FREE_LOCAL_MAX_INVOICE_LINES) {
-          const cappedInvoiceLines = basePayload.invoice_lines.slice(0, FREE_LOCAL_MAX_INVOICE_LINES);
-          const allowedSkus = new Set(cappedInvoiceLines.map((l) => l.sku.trim().toUpperCase()));
+        const uniqueInvoiceSkus: string[] = [];
+        const seenInvoiceSku = new Set<string>();
+        for (const l of basePayload.invoice_lines) {
+          const key = l.sku.trim().toUpperCase();
+          if (key && !seenInvoiceSku.has(key)) {
+            seenInvoiceSku.add(key);
+            uniqueInvoiceSkus.push(key);
+          }
+        }
+
+        if (!args.demo_mode && !entitlement.unlocked && uniqueInvoiceSkus.length > FREE_LOCAL_MAX_INVOICE_LINES) {
+          const allowedSkus = new Set(uniqueInvoiceSkus.slice(0, FREE_LOCAL_MAX_INVOICE_LINES));
+          const cappedInvoiceLines = basePayload.invoice_lines.filter((l) =>
+            allowedSkus.has(l.sku.trim().toUpperCase())
+          );
           // If receiving_lines had entries for other SKUs, preserve a sentinel receiving check when filtering
           const filteredReceiving = basePayload.receiving_lines.filter((l) =>
             allowedSkus.has(l.sku.trim().toUpperCase())
@@ -435,9 +447,11 @@ export function createPoPilotServer(): McpServer {
           };
           truncationMeta = {
             truncated_by_free_tier: true,
+            invoice_skus_received: uniqueInvoiceSkus.length,
+            invoice_skus_processed: FREE_LOCAL_MAX_INVOICE_LINES,
             invoice_lines_received: basePayload.invoice_lines.length,
-            invoice_lines_processed: FREE_LOCAL_MAX_INVOICE_LINES,
-            invoice_lines_omitted: basePayload.invoice_lines.length - FREE_LOCAL_MAX_INVOICE_LINES,
+            invoice_lines_processed: cappedInvoiceLines.length,
+            invoice_lines_omitted: basePayload.invoice_lines.length - cappedInvoiceLines.length,
             upgrade_notice: UPGRADE_NOTICE
           };
         }

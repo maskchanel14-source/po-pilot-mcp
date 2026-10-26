@@ -1,5 +1,7 @@
 # Design Spec: `po-pilot-mcp` (Shopify Replenishment, MOQ Purchase Order & 3-Way Match MCP)
 
+> **Historical Phase-2 Spec Note:** This document captures the initial MVP architecture prior to the v1.0.0 value-multiplier upgrades (Shopify POS Transfer CSV, US Tariff Landed Cost + Open-to-Buy cap, QuickBooks/Xero Verified Bill CSVs, n8n Workflow `#03`, and updated `$49` Early-Bird / `$99` Solo / `$249` Agency + `$29/$79` Cloud tiers). Refer to [`README.md`](../../../README.md) as the authoritative production specification.
+
 - **Date**: 2026-10-26
 - **Author**: Senior MCP Architect + Indie Hacker Workflow (`brainstorming` skill spec)
 - **Target Market**: US Shopify merchants, omnichannel wholesalers, and e-commerce finance ops

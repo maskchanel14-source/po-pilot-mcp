@@ -40,8 +40,11 @@ export interface ThreeWayMatchResult {
 
 function resolveIsoDate(raw: string | undefined, fallbackDate: Date): string {
   if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
-    const ms = Date.parse(`${raw.trim()}T00:00:00Z`);
-    if (Number.isFinite(ms)) return raw.trim();
+    const clean = raw.trim();
+    const ms = Date.parse(`${clean}T00:00:00Z`);
+    if (Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === clean) {
+      return clean;
+    }
   }
   return fallbackDate.toISOString().slice(0, 10);
 }
@@ -279,15 +282,16 @@ export function runThreeWayMatch(input: {
       });
     }
 
-    if (inv.billed_unit_cost_usd > po.unit_cost_usd + 0.001) {
-      const priceDiff = inv.billed_unit_cost_usd - po.unit_cost_usd;
+    const priceDiff = inv.billed_unit_cost_usd - po.unit_cost_usd;
+    const priceOverchargeUsd = Number((priceDiff * inv.billed_qty).toFixed(2));
+    if (priceDiff > 1e-9 && priceOverchargeUsd >= 0.01) {
       discrepancies.push({
         sku: inv.sku,
         issue_type: "UNIT_PRICE_OVERCHARGE",
-        po_expected: `$${po.unit_cost_usd.toFixed(2)}/unit`,
+        po_expected: `$${formatXeroUnitAmount(po.unit_cost_usd)}/unit`,
         warehouse_received: `${payableQty} good units`,
-        vendor_billed: `$${inv.billed_unit_cost_usd.toFixed(2)}/unit on ${inv.billed_qty} units`,
-        overcharge_usd: Number((priceDiff * inv.billed_qty).toFixed(2))
+        vendor_billed: `$${formatXeroUnitAmount(inv.billed_unit_cost_usd)}/unit on ${inv.billed_qty} units`,
+        overcharge_usd: priceOverchargeUsd
       });
     }
   }
@@ -373,7 +377,8 @@ export function runThreeWayMatch(input: {
     invoice_date: invoiceDate,
     due_date: dueDate,
     currency,
-    payment_recommendation: discrepancies.length === 0 ? "APPROVE_IN_FULL" : "HOLD_AND_ISSUE_DEBIT_MEMO",
+    payment_recommendation:
+      discrepancies.length === 0 && recovered === 0 ? "APPROVE_IN_FULL" : "HOLD_AND_ISSUE_DEBIT_MEMO",
     total_po_amount_usd: totalPo,
     total_invoice_billed_usd: totalBilled,
     verified_payable_amount_usd: verifiedPayable,
